@@ -1,0 +1,1102 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Long COVID Steps &amp; HR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single scanning column of panels. Summary first (KPIs, status calendar), then pacing evidence, then vitals and tables. */
+:root {
+  --bg: #f3f5f6;
+  --surface: #ffffff;
+  --surface-2: #eef1f3;
+  --line: #dde2e6;
+  --grid: #e8ecef;
+  --ink: #12181d;
+  --ink-2: #4b5660;
+  --ink-3: #75808a;
+  --accent: #1c5cab;
+  --steps: #2a78d6;
+  --hr: #eb6834;
+  --hr-soft: rgba(235,104,52,.18);
+  --hrv: #1baf7a;
+  --sleep: #4a3aa7;
+  --base: #8b949c;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --nodata: #e6e9ec;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Public Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111416; --surface: #191c1f; --surface-2: #22262a; --line: #2e3338; --grid: #262a2e;
+    --ink: #f2f4f5; --ink-2: #b9c1c8; --ink-3: #8a949d; --accent: #6da7ec;
+    --steps: #3987e5; --hr: #d95926; --hr-soft: rgba(217,89,38,.25); --hrv: #199e70; --sleep: #9085e9; --base: #7d868e;
+    --nodata: #2a2e33; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111416; --surface: #191c1f; --surface-2: #22262a; --line: #2e3338; --grid: #262a2e;
+  --ink: #f2f4f5; --ink-2: #b9c1c8; --ink-3: #8a949d; --accent: #6da7ec;
+  --steps: #3987e5; --hr: #d95926; --hr-soft: rgba(217,89,38,.25); --hrv: #199e70; --sleep: #9085e9; --base: #7d868e;
+  --nodata: #2a2e33; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--body); margin: 0; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 64px; display: grid; gap: 20px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(1.7rem, 3.5vw, 2.4rem); font-weight: 700; }
+h2 { font-size: 1.2rem; font-weight: 700; }
+h3 { font-size: .95rem; font-weight: 500; }
+p { margin: 0; }
+.muted { color: var(--ink-2); }
+.small { font-size: .82rem; }
+.mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+
+header.top { display: grid; gap: 14px; }
+.top-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; justify-content: space-between; }
+.lede { max-width: 68ch; color: var(--ink-2); }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: .78rem; font-weight: 600; background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); }
+.badge.sample { color: var(--ink); border-color: var(--warning); }
+
+.controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; color: var(--ink-2); padding: 6px 11px; font: 500 .82rem var(--body); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.ctl { display: inline-flex; align-items: center; gap: 8px; font-size: .82rem; color: var(--ink-2); }
+input[type="date"] { font: .82rem var(--mono); padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.btn { font: 600 .84rem var(--body); padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn:hover { filter: brightness(1.05); }
+button:focus-visible, input:focus-visible, summary:focus-visible, label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.drop { border: 1.5px dashed var(--line); border-radius: 10px; padding: 16px; display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; background: var(--surface); }
+.drop.over { border-color: var(--accent); background: var(--surface-2); }
+.drop input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.drop .how { flex: 1 1 320px; min-width: 0; font-size: .85rem; color: var(--ink-2); }
+.progress { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; flex-basis: 100%; }
+.progress > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: space-between; align-items: baseline; }
+.panel-head p { max-width: 70ch; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 20px; }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.kpi { background: var(--surface); padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
+.kpi .v { font: 500 1.6rem/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+.kpi .v small { font-size: .8rem; color: var(--ink-3); margin-left: 3px; }
+.kpi .d { font-size: .78rem; color: var(--ink-2); }
+.kpi .d b { font-weight: 600; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: 0; }
+
+.insights { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.insights li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; font-size: .92rem; }
+.insights .ic { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font: 700 .75rem var(--mono); color: #fff; }
+
+.chart { position: relative; min-width: 0; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { fill: var(--ink-3); font: 11px var(--mono); }
+.chart .gl { stroke: var(--grid); stroke-width: 1; }
+.chart .ax { stroke: var(--line); stroke-width: 1; }
+.chart-title { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; justify-content: space-between; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .78rem; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.legend i.sq { height: 10px; width: 10px; border-radius: 3px; }
+.legend i.dash { background: repeating-linear-gradient(90deg, var(--base) 0 4px, transparent 4px 7px) !important; }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--surface); padding: 7px 10px; border-radius: 7px; font: 12px/1.45 var(--mono); white-space: nowrap; z-index: 3; transform: translate(-50%, calc(-100% - 10px)); box-shadow: 0 4px 14px rgba(0,0,0,.18); }
+.tip b { font-weight: 500; opacity: .7; }
+.empty-chart { padding: 28px 0; text-align: center; color: var(--ink-3); font-size: .85rem; }
+
+.cal { overflow-x: auto; }
+.cal-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: .8rem; color: var(--ink-2); }
+.cal-legend span { display: inline-flex; gap: 6px; align-items: center; }
+.cal-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-grid; place-items: center; font: 700 8px var(--mono); color: #fff; font-style: normal; }
+
+.vitals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
+.vital { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 6px; min-width: 0; }
+.vital .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.vital .v { font: 500 1.25rem var(--mono); font-variant-numeric: tabular-nums; }
+.vital .note { font-size: .76rem; color: var(--ink-3); }
+
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: .84rem; }
+th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 600; color: var(--ink-2); background: var(--surface-2); font-size: .76rem; letter-spacing: .03em; text-transform: uppercase; }
+td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: .76rem; font-weight: 600; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); }
+.meter { height: 8px; width: 120px; background: var(--surface-2); border-radius: 4px; overflow: hidden; display: inline-block; vertical-align: middle; }
+.meter > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+
+details > summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+details[open] > summary { margin-bottom: 10px; }
+.foot { font-size: .78rem; color: var(--ink-3); max-width: 80ch; display: grid; gap: 6px; }
+.err { color: var(--critical); font-weight: 600; font-size: .85rem; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="top-row">
+      <div style="display:grid;gap:6px">
+        <span class="eyebrow">Apple Health · Pacing and recovery</span>
+        <h1>Long COVID Steps &amp; Heart Rate</h1>
+      </div>
+      <span id="dataBadge" class="badge sample">Example data</span>
+    </div>
+    <p class="lede">Load your Apple Health export to see activity, resting heart rate, HRV and heart rate patterns tied to post-exertional malaise (PEM), orthostatic symptoms and recovery over time. The file is read in your browser and never uploaded.</p>
+  </header>
+
+  <section class="drop" id="drop" aria-label="Load Apple Health export">
+    <label class="btn primary" for="file">Choose export.zip or export.xml</label>
+    <input id="file" type="file" accept=".zip,.xml,application/zip,text/xml">
+    <button class="btn" id="sampleBtn" type="button">Reload example</button>
+    <div class="how">iPhone: Health app → profile picture → <b>Export All Health Data</b>. Save the zip to Files, then choose it here or drop it on this box. Large exports (1 GB+) take a minute or two.</div>
+    <div class="progress" id="progWrap" hidden><i id="prog"></i></div>
+    <div class="small muted" id="status" aria-live="polite"></div>
+  </section>
+
+  <div class="controls" role="toolbar" aria-label="Filters">
+    <div class="ctl"><span>Range</span>
+      <div class="seg" id="range">
+        <button type="button" data-r="30">30d</button>
+        <button type="button" data-r="90" aria-pressed="true">90d</button>
+        <button type="button" data-r="182">6m</button>
+        <button type="button" data-r="365">1y</button>
+        <button type="button" data-r="0">All</button>
+      </div>
+    </div>
+    <label class="ctl" for="onset">COVID onset <input type="date" id="onset"></label>
+    <span class="small muted" id="rangeLabel"></span>
+  </div>
+
+  <section class="kpis" id="kpis" aria-label="Last 30 days summary"></section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>What stands out</h2>
+      <span class="small muted">Generated from the selected range</span>
+    </div>
+    <ul class="insights" id="insights"></ul>
+  </section>
+
+  <section class="panel" id="recoveryPanel" hidden>
+    <div class="panel-head">
+      <h2>Recovery vs. before COVID</h2>
+      <p class="small muted">Pre-illness = 90 days before onset. Low point = worst 30-day average after onset. Recovered = how much of the gap between the low point and your pre-illness level you have closed in the last 30 days.</p>
+    </div>
+    <div class="tbl-wrap"><table id="recoveryTbl"></table></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Daily status</h2>
+      <p class="small muted">Each square is a day, scored from resting HR and HRV against your own trailing 28-day baseline.</p>
+    </div>
+    <div class="cal-legend">
+      <span><i style="background:var(--good)">✓</i>Stable</span>
+      <span><i style="background:var(--warning)">!</i>Watch: RHR +3 bpm or HRV −20%</span>
+      <span><i style="background:var(--serious)">!!</i>Strained: both, or a larger shift</span>
+      <span><i style="background:var(--critical)">×</i>Crash: strained and activity under half your norm</span>
+      <span><i style="background:var(--nodata)"></i>No data</span>
+    </div>
+    <div class="cal chart" id="cal"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Steps and your energy envelope</h2>
+      <p class="small muted" id="envNote"></p>
+    </div>
+    <div class="chart-title"><h3>Daily steps</h3>
+      <div class="legend"><span><i class="sq" style="background:var(--steps)"></i>Steps</span><span><i style="background:var(--ink-2)"></i>7-day average</span><span><i class="dash"></i>Comfort ceiling</span></div>
+    </div>
+    <div class="chart" id="cSteps"></div>
+    <div class="grid2">
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>Strain within 2 days, by step count</h3></div>
+        <p class="small muted">Share of days followed by a Strained or Crash day in the next 48 hours.</p>
+        <div class="chart" id="cBuckets"></div>
+      </div>
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>After a big day</h3>
+          <div class="legend"><span><i style="background:var(--hr)"></i>RHR change, bpm</span></div>
+        </div>
+        <p class="small muted" id="eventNote">Average resting HR change around days with steps 1.5× your 14-day norm. PEM usually shows 1 to 3 days later.</p>
+        <div class="chart" id="cEvent"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Resting heart rate and HRV</h2>
+      <p class="small muted">The two most sensitive early-warning signals for overexertion. A rising RHR or falling HRV for 2+ days is a cue to rest.</p>
+    </div>
+    <div class="grid2">
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>Resting HR, bpm</h3>
+          <div class="legend"><span><i style="background:var(--hr)"></i>Resting HR</span><span><i class="dash"></i>28-day baseline</span></div>
+        </div>
+        <div class="chart" id="cRHR"></div>
+      </div>
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>HRV (SDNN), ms</h3>
+          <div class="legend"><span><i style="background:var(--hrv)"></i>HRV</span><span><i class="dash"></i>28-day baseline</span></div>
+        </div>
+        <div class="chart" id="cHRV"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Heart rate across the day</h2>
+      <p class="small muted" id="atNote"></p>
+    </div>
+    <div class="chart-title"><h3>Daily heart rate range, bpm</h3>
+      <div class="legend"><span><i class="sq" style="background:var(--hr-soft)"></i>Low to high</span><span><i style="background:var(--hr)"></i>Daily average</span></div>
+    </div>
+    <div class="chart" id="cHRRange"></div>
+    <div class="grid2">
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>Minutes above anaerobic threshold</h3></div>
+        <p class="small muted">Time with HR above your estimated threshold (resting baseline + 15 bpm). Pacing guidance for ME/CFS and long COVID aims to keep this short.</p>
+        <div class="chart" id="cAT"></div>
+      </div>
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>High HR while still</h3></div>
+        <p class="small muted">Hours with fewer than 100 steps but average HR 30+ bpm above resting. Frequent hours can point to orthostatic intolerance or POTS and are worth raising with a clinician.</p>
+        <div class="chart" id="cPOTS"></div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>Average HR by hour of day, bpm</h3></div>
+        <div class="chart" id="cHourHR"></div>
+      </div>
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>Average steps by hour of day</h3></div>
+        <div class="chart" id="cHourSteps"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Other recovery markers</h2>
+      <p class="small muted">Last 30 days of the range compared with the 30 days before. Arrows show direction; the note says whether that direction is better for recovery.</p>
+    </div>
+    <div class="vitals" id="vitals"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Exertion days and what followed</h2>
+      <p class="small muted">Days with steps at least 1.5× your 14-day norm. Outcome uses the worst status in the next 3 days.</p>
+    </div>
+    <div class="tbl-wrap"><table id="eventsTbl"></table></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Weekly summary</h2>
+      <button class="btn" id="copyCsv" type="button">Copy daily data as CSV</button>
+    </div>
+    <div class="tbl-wrap"><table id="weekTbl"></table></div>
+    <details>
+      <summary>Daily data table</summary>
+      <div class="tbl-wrap"><table id="dayTbl"></table></div>
+    </details>
+  </section>
+
+  <footer class="foot">
+    <p><b>Not medical advice.</b> These are pattern-finding tools based on published pacing approaches (Workwell Foundation heart-rate pacing, Bateman Horne Center guidance). Thresholds are estimates; your clinician can set personal limits, especially if you take beta blockers or ivabradine, which lower heart rate.</p>
+    <p>Steps from iPhone and Apple Watch are de-duplicated by taking the higher source each hour. Heart rate is reduced to one value per minute so workouts do not outweigh background readings.</p>
+  </footer>
+</div>
+
+<script>
+"use strict";
+// ---------- constants ----------
+const QTYPES = {
+  HKQuantityTypeIdentifierRestingHeartRate: ['rhr', 'mean'],
+  HKQuantityTypeIdentifierHeartRateVariabilitySDNN: ['hrv', 'mean'],
+  HKQuantityTypeIdentifierWalkingHeartRateAverage: ['walkHR', 'mean'],
+  HKQuantityTypeIdentifierHeartRateRecoveryOneMinute: ['hrr', 'mean'],
+  HKQuantityTypeIdentifierOxygenSaturation: ['spo2', 'mean'],
+  HKQuantityTypeIdentifierRespiratoryRate: ['resp', 'mean'],
+  HKQuantityTypeIdentifierVO2Max: ['vo2', 'mean'],
+  HKQuantityTypeIdentifierWalkingSpeed: ['walkSpeed', 'mean'],
+  HKQuantityTypeIdentifierDistanceWalkingRunning: ['dist', 'sum'],
+  HKQuantityTypeIdentifierFlightsClimbed: ['flights', 'sum'],
+  HKQuantityTypeIdentifierAppleExerciseTime: ['exer', 'sum'],
+};
+const STATUS = {
+  ok:     { label: 'Stable',   color: 'var(--good)',     icon: '✓' },
+  watch:  { label: 'Watch',    color: 'var(--warning)',  icon: '!' },
+  strain: { label: 'Strained', color: 'var(--serious)',  icon: '!!' },
+  crash:  { label: 'Crash',    color: 'var(--critical)', icon: '×' },
+};
+const $ = s => document.querySelector(s);
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+
+// ---------- date helpers ----------
+const DAY = 86400000;
+const toMs = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10));
+const fromMs = ms => new Date(ms).toISOString().slice(0, 10);
+const addDays = (d, n) => fromMs(toMs(d) + n * DAY);
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const fmtDate = d => `${MONTHS[+d.slice(5, 7) - 1]} ${+d.slice(8, 10)}`;
+const fmtDateY = d => `${fmtDate(d)}, ${d.slice(0, 4)}`;
+const WEEKDAY = d => new Date(toMs(d)).getUTCDay();
+// "2024-03-02 07:15:00 -0500" -> epoch ms
+function tsMs(s) {
+  const ms = Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10), +s.slice(11, 13), +s.slice(14, 16), +s.slice(17, 19));
+  const z = s.slice(20, 25); if (z.length < 5) return ms;
+  const off = (z[0] === '-' ? -1 : 1) * (+z.slice(1, 3) * 60 + +z.slice(3, 5));
+  return ms - off * 60000;
+}
+
+// ---------- stats helpers ----------
+const nn = a => a.filter(v => v != null && !Number.isNaN(v));
+const mean = a => { a = nn(a); return a.length ? a.reduce((s, v) => s + v, 0) / a.length : null; };
+function quantile(a, q) { a = nn(a).sort((x, y) => x - y); if (!a.length) return null; const p = (a.length - 1) * q, lo = Math.floor(p), hi = Math.ceil(p); return a[lo] + (a[hi] - a[lo]) * (p - lo); }
+const median = a => quantile(a, .5);
+const round = (v, d = 0) => v == null ? null : Math.round(v * 10 ** d) / 10 ** d;
+const fmt = (v, d = 0) => v == null ? '–' : round(v, d).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+const sign = (v, d = 0) => v == null ? '–' : (v > 0 ? '+' : v < 0 ? '−' : '±') + fmt(Math.abs(v), d);
+
+// ---------- raw store ----------
+function rawDay() { return { steps: {}, hr: null, mean: {}, sum: {}, sleep: {} }; }
+function getDay(raw, d) { let r = raw.get(d); if (!r) { r = rawDay(); raw.set(d, r); } return r; }
+
+// ---------- XML streaming parser ----------
+function attr(s, name) {
+  const k = ' ' + name + '="'; const i = s.indexOf(k); if (i < 0) return null;
+  const j = s.indexOf('"', i + k.length); return s.slice(i + k.length, j);
+}
+function makeLineHandler(raw, meta) {
+  return function (line) {
+    const ri = line.indexOf('<Record ');
+    if (ri < 0) return;
+    const type = attr(line, 'type'); if (!type) return;
+    const isSteps = type === 'HKQuantityTypeIdentifierStepCount';
+    const isHR = type === 'HKQuantityTypeIdentifierHeartRate';
+    const isSleep = type === 'HKCategoryTypeIdentifierSleepAnalysis';
+    const q = QTYPES[type];
+    if (!isSteps && !isHR && !isSleep && !q) return;
+    const start = attr(line, 'startDate'); if (!start) return;
+    const d = start.slice(0, 10);
+    const valS = attr(line, 'value');
+    if (isSleep) {
+      if (!valS || valS.indexOf('Asleep') < 0) return;
+      const end = attr(line, 'endDate'); const ed = end.slice(0, 10);
+      const dur = tsMs(end) - tsMs(start); if (!(dur > 0)) return;
+      const src = attr(line, 'sourceName') || '?';
+      const r = getDay(raw, ed); r.sleep[src] = (r.sleep[src] || 0) + dur; meta.count++;
+      return;
+    }
+    let v = parseFloat(valS); if (!Number.isFinite(v)) return;
+    const r = getDay(raw, d); meta.count++;
+    if (isSteps) {
+      const src = attr(line, 'sourceName') || '?';
+      let a = r.steps[src]; if (!a) a = r.steps[src] = new Float64Array(24);
+      a[+start.slice(11, 13)] += v;
+    } else if (isHR) {
+      if (!r.hr) r.hr = new Uint8Array(1440);
+      const m = +start.slice(11, 13) * 60 + +start.slice(14, 16);
+      const hv = Math.min(255, Math.round(v));
+      if (hv > r.hr[m]) r.hr[m] = hv;
+    } else {
+      const [key, kind] = q; const unit = attr(line, 'unit') || '';
+      if (key === 'spo2' && v <= 1) v *= 100;
+      if (key === 'walkSpeed') { if (unit.startsWith('mi')) { v *= 1.609344; meta.imperial = true; } else if (unit === 'm/s') v *= 3.6; }
+      if (key === 'dist') { if (unit === 'mi') { v *= 1.609344; meta.imperial = true; } else if (unit === 'm') v /= 1000; }
+      if (kind === 'mean') { const t = r.mean[key] || (r.mean[key] = [0, 0]); t[0] += v; t[1]++; }
+      else { const src = attr(line, 'sourceName') || '?'; const t = r.sum[key] || (r.sum[key] = {}); t[src] = (t[src] || 0) + v; }
+    }
+  };
+}
+async function consumeText(stream, onLine) {
+  const reader = stream.getReader(); let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    const cut = buf.lastIndexOf('\n'); if (cut < 0) continue;
+    const lines = buf.slice(0, cut).split('\n'); buf = buf.slice(cut + 1);
+    for (let i = 0; i < lines.length; i++) onLine(lines[i]);
+  }
+  if (buf) onLine(buf);
+}
+function counting(total, onProgress) {
+  let seen = 0, last = 0;
+  return new TransformStream({ transform(chunk, ctl) { seen += chunk.byteLength; const now = performance.now(); if (now - last > 120) { last = now; onProgress(seen / total); } ctl.enqueue(chunk); } });
+}
+
+// ---------- ZIP reader (central directory, streams one entry) ----------
+async function readBytes(file, start, len) { return new DataView(await file.slice(start, start + len).arrayBuffer()); }
+const u64 = (dv, o) => dv.getUint32(o, true) + dv.getUint32(o + 4, true) * 2 ** 32;
+async function findZipEntry(file, test) {
+  const tailLen = Math.min(file.size, 65557 + 20);
+  const tail = await readBytes(file, file.size - tailLen, tailLen);
+  let eocd = -1;
+  for (let i = tailLen - 22; i >= 0; i--) if (tail.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('This does not look like a zip file.');
+  let cdSize = tail.getUint32(eocd + 12, true), cdOff = tail.getUint32(eocd + 16, true);
+  if (cdOff === 0xffffffff || cdSize === 0xffffffff) {
+    const loc = eocd - 20;
+    if (loc >= 0 && tail.getUint32(loc, true) === 0x07064b50) {
+      const z64off = u64(tail, loc + 8);
+      const z = await readBytes(file, z64off, 56);
+      cdSize = u64(z, 40); cdOff = u64(z, 48);
+    }
+  }
+  const cd = await readBytes(file, cdOff, cdSize);
+  const dec = new TextDecoder();
+  for (let p = 0; p + 46 <= cd.byteLength && cd.getUint32(p, true) === 0x02014b50;) {
+    const method = cd.getUint16(p + 10, true);
+    let comp = cd.getUint32(p + 20, true), unc = cd.getUint32(p + 24, true);
+    const nLen = cd.getUint16(p + 28, true), eLen = cd.getUint16(p + 30, true), cLen = cd.getUint16(p + 32, true);
+    let off = cd.getUint32(p + 42, true);
+    const name = dec.decode(new Uint8Array(cd.buffer, cd.byteOffset + p + 46, nLen));
+    let e = p + 46 + nLen; const eEnd = e + eLen;
+    while (e + 4 <= eEnd) {
+      const id = cd.getUint16(e, true), sz = cd.getUint16(e + 2, true); let q = e + 4;
+      if (id === 1) {
+        if (unc === 0xffffffff) { unc = u64(cd, q); q += 8; }
+        if (comp === 0xffffffff) { comp = u64(cd, q); q += 8; }
+        if (off === 0xffffffff) { off = u64(cd, q); q += 8; }
+      }
+      e += 4 + sz;
+    }
+    if (test(name)) {
+      const lh = await readBytes(file, off, 30);
+      const start = off + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
+      return { name, method, start, comp };
+    }
+    p = eEnd + cLen;
+  }
+  return null;
+}
+
+async function parseFile(file, onProgress) {
+  const raw = new Map(), meta = { count: 0, imperial: false };
+  const onLine = makeLineHandler(raw, meta);
+  let bytes;
+  if (/\.zip$/i.test(file.name) || file.type.includes('zip')) {
+    const entry = await findZipEntry(file, n => /(^|\/)export\.xml$/i.test(n));
+    if (!entry) throw new Error('No export.xml found inside the zip. Unzip it and choose export.xml instead.');
+    let s = file.slice(entry.start, entry.start + entry.comp).stream().pipeThrough(counting(entry.comp, onProgress));
+    if (entry.method === 8) {
+      if (typeof DecompressionStream === 'undefined') throw new Error('This browser cannot unzip files. Unzip the export and choose export.xml.');
+      s = s.pipeThrough(new DecompressionStream('deflate-raw'));
+    } else if (entry.method !== 0) throw new Error('Unsupported zip compression. Unzip the export and choose export.xml.');
+    bytes = s;
+  } else {
+    bytes = file.stream().pipeThrough(counting(file.size, onProgress));
+  }
+  await consumeText(bytes.pipeThrough(new TextDecoderStream()), onLine);
+  return { raw, meta };
+}
+
+// ---------- derive daily series ----------
+function derive(raw, meta) {
+  const keys = [...raw.keys()].filter(k => /^\d{4}-\d\d-\d\d$/.test(k)).sort();
+  if (!keys.length) return [];
+  const days = [];
+  for (let d = keys[0]; d <= keys[keys.length - 1]; d = addDays(d, 1)) {
+    const r = raw.get(d); const o = { date: d };
+    if (r) {
+      const srcs = Object.values(r.steps);
+      if (srcs.length) {
+        o.hSteps = Array.from({ length: 24 }, (_, h) => Math.max(...srcs.map(a => a[h])));
+        o.steps = o.hSteps.reduce((s, v) => s + v, 0);
+      }
+      if (r.hr) {
+        let mn = 999, mx = 0, s = 0, n = 0; const hs = new Array(24).fill(0), hn = new Array(24).fill(0);
+        for (let m = 0; m < 1440; m++) { const v = r.hr[m]; if (!v) continue; if (v < mn) mn = v; if (v > mx) mx = v; s += v; n++; hs[m / 60 | 0] += v; hn[m / 60 | 0]++; }
+        if (n) { o.hrMin = mn; o.hrMax = mx; o.hrAvg = s / n; o.hHR = hs.map((v, i) => hn[i] ? v / hn[i] : null); o.hN = hn; o.hrMinutes = r.hr; }
+      }
+      for (const k in r.mean) o[k] = r.mean[k][0] / r.mean[k][1];
+      for (const k in r.sum) o[k] = Math.max(...Object.values(r.sum[k]));
+      const sl = Object.values(r.sleep); if (sl.length) o.sleep = Math.min(16, Math.max(...sl) / 3600000);
+    }
+    days.push(o);
+  }
+  // baselines and flags
+  for (let i = 0; i < days.length; i++) {
+    const o = days[i];
+    const w28 = days.slice(Math.max(0, i - 28), i), w14 = days.slice(Math.max(0, i - 14), i);
+    const rhrW = nn(w28.map(x => x.rhr)), hrvW = nn(w28.map(x => x.hrv)), stW = nn(w28.map(x => x.steps)), st14 = nn(w14.map(x => x.steps));
+    o.rhrBase = rhrW.length >= 7 ? median(rhrW) : null;
+    o.hrvBase = hrvW.length >= 7 ? median(hrvW) : null;
+    o.stepsBase = stW.length >= 7 ? median(stW) : null;
+    o.steps14 = st14.length >= 5 ? median(st14) : null;
+    let score = null;
+    if (o.rhr != null && o.rhrBase != null) { o.rhrDelta = o.rhr - o.rhrBase; score = (o.rhrDelta >= 3 ? 1 : 0) + (o.rhrDelta >= 6 ? 1 : 0); }
+    if (o.hrv != null && o.hrvBase != null) { o.hrvPct = o.hrv / o.hrvBase - 1; score = (score || 0) + (o.hrvPct <= -0.2 ? 1 : 0) + (o.hrvPct <= -0.35 ? 1 : 0); }
+    o.score = score;
+    o.low = o.steps != null && o.stepsBase != null && o.steps < 0.5 * o.stepsBase;
+    o.status = score == null ? null : score >= 2 ? (o.low ? 'crash' : 'strain') : score === 1 ? 'watch' : 'ok';
+    o.exertion = o.steps != null && o.steps14 != null && o.steps >= Math.max(1.5 * o.steps14, o.steps14 + 1500);
+    // HR-based pacing metrics
+    const rb = o.rhrBase ?? o.rhr;
+    if (o.hrMinutes && rb != null) {
+      o.at = Math.round(rb + 15);
+      let above = 0, last = 0, lastM = -99;
+      for (let m = 0; m < 1440; m++) {
+        const v = o.hrMinutes[m];
+        if (v) { last = v; lastM = m; }
+        if (last && m - lastM < 5 && last > o.at) above++;
+      }
+      o.atMin = above;
+      if (o.hSteps) {
+        let p = 0;
+        for (let h = 0; h < 24; h++) if (o.hHR[h] != null && o.hN[h] >= 2 && o.hSteps[h] < 100 && o.hHR[h] >= rb + 30) p++;
+        o.pots = p;
+      }
+    }
+  }
+  return days;
+}
+
+// ---------- example data ----------
+function rng(seed) { return () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; }; }
+function makeSample() {
+  const R = rng(42), gauss = () => { let s = 0; for (let i = 0; i < 6; i++) s += R(); return s - 3; };
+  const raw = new Map(); const N = 330, onsetI = 75;
+  const end = fromMs(Date.now() - DAY), startD = addDays(end, -(N - 1));
+  let fatigue = 0;
+  for (let i = 0; i < N; i++) {
+    const d = addDays(startD, i), r = getDay(raw, d);
+    const post = i >= onsetI, t = i - onsetI;
+    const recov = post ? Math.min(1, Math.max(0, (t - 20) / 260)) : 1;
+    let stepsTarget = post ? (t < 14 ? 1200 : 2600 + 4200 * recov) : 8800;
+    const wk = WEEKDAY(d); if (wk === 0 || wk === 6) stepsTarget *= post ? 1.05 : 1.15;
+    const pushDay = post && t > 25 && R() < 0.09;
+    if (pushDay) stepsTarget *= 1.9 + R() * 0.6;
+    stepsTarget *= Math.max(0.35, 1 - fatigue * 0.22);
+    const steps = Math.max(250, stepsTarget * (1 + gauss() * 0.15));
+    const baseRHR = post ? 58 + (t < 14 ? 16 : 11 * (1 - recov) + 2) : 58;
+    const rhr = baseRHR + fatigue * 3.4 + gauss() * 1.4;
+    const baseHRV = post ? 54 - (t < 14 ? 26 : 20 * (1 - recov) + 4) : 54;
+    const hrv = Math.max(12, baseHRV - fatigue * 7 + gauss() * 4);
+    // fatigue from exertion relative to capacity, delayed
+    const cap = post ? 2600 + 4200 * recov : 99999;
+    fatigue = fatigue * 0.6 + Math.max(0, (steps - cap * 1.25) / cap) * 1.6;
+    const src = 'Apple Watch', a = r.steps[src] = new Float64Array(24);
+    const shape = [0,0,0,0,0,0,.2,.6,1,1.1,1.2,1.3,1.4,1.2,1,1,1.1,1.3,1.2,.9,.6,.3,.1,0];
+    const tot = shape.reduce((s, v) => s + v, 0);
+    for (let h = 0; h < 24; h++) a[h] = Math.max(0, steps * shape[h] / tot * (1 + gauss() * 0.3));
+    r.hr = new Uint8Array(1440);
+    const potsy = post ? (1 - recov) * 0.5 : 0;
+    const spikeH = Array.from({ length: 24 }, (_, h) => h >= 8 && h < 22 && R() < potsy * 0.12);
+    for (let m = 0; m < 1440; m += 5) {
+      const h = m / 60 | 0, asleep = h < 6 || h >= 23;
+      let v = rhr + (asleep ? -3 : 4) + a[h] / 60 * 0.5 + gauss() * 3;
+      if (spikeH[h]) { v += 34 + R() * 8; a[h] = Math.min(a[h], 60); }
+      else if (!asleep && R() < 0.04) v += 25 + R() * 30;
+      r.hr[m] = Math.max(40, Math.min(200, Math.round(v)));
+    }
+    r.mean.rhr = [rhr, 1]; r.mean.hrv = [hrv, 1];
+    r.mean.walkHR = [rhr + 34 - recov * 4 + gauss() * 2, 1];
+    r.mean.spo2 = [97.2 - (post ? (1 - recov) * 1.2 : 0) + gauss() * 0.5, 1];
+    r.mean.resp = [14.2 + (post ? (1 - recov) * 2 : 0) + gauss() * 0.6, 1];
+    if (i % 7 === 0) r.mean.vo2 = [post ? 31 + recov * 6 + gauss() * 0.6 : 39 + gauss() * 0.5, 1];
+    r.mean.walkSpeed = [post ? 3.9 + recov * 0.8 : 4.9 + gauss() * 0.1, 1];
+    if (i % 9 === 0 && (!post || recov > 0.3)) r.mean.hrr = [post ? 14 + recov * 8 : 24, 1];
+    r.sum.dist = { [src]: steps * 0.00072 };
+    r.sum.flights = { [src]: Math.max(0, Math.round(steps / 900 + gauss())) };
+    r.sum.exer = { [src]: Math.max(0, Math.round(post ? recov * 12 : 32 + gauss() * 8)) };
+    r.sleep[src] = (post ? 8.6 - recov * 1.1 + fatigue * 0.8 : 7.2) * 3600000 * (1 + gauss() * 0.06);
+  }
+  return { raw, meta: { count: 0, imperial: true }, onset: addDays(startD, onsetI) };
+}
+
+// ---------- app state ----------
+const state = { days: [], meta: {}, range: 90, onset: store.get('lc_onset') || '', sample: true };
+
+// ---------- SVG chart helpers ----------
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs = {}, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function niceTicks(lo, hi, n = 4) {
+  if (lo === hi) { hi = lo + 1; }
+  const span = hi - lo, step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => span / s <= n) || 10 * mag;
+  const t0 = Math.floor(lo / step) * step, t1 = Math.ceil(hi / step) * step; const out = [];
+  for (let t = t0; t <= t1 + step / 2; t += step) out.push(round(t, 6));
+  return out;
+}
+function topRoundedBar(x, y0, w, y1, r = 4) {
+  const h = y0 - y1; if (h <= 0) return '';
+  r = Math.min(r, w / 2, h);
+  return `M${x},${y0}V${y1 + r}Q${x},${y1} ${x + r},${y1}H${x + w - r}Q${x + w},${y1} ${x + w},${y1 + r}V${y0}Z`;
+}
+/*
+  opts: { rows, labels(i)->string, series:[{key|get, type:'bar'|'line'|'band', color, lo, hi, dash, label, fmt}],
+          height, yMin, yMax, zeroLine, refs:[{y,label}], tip(i)->html, xTicks(i)->label|null }
+*/
+function drawChart(host, opts) {
+  host.innerHTML = '';
+  const rows = opts.rows; if (!rows.length) { host.innerHTML = '<div class="empty-chart">No data in this range</div>'; return; }
+  const get = s => i => s.get ? s.get(rows[i], i) : rows[i][s.key];
+  const vals = [];
+  for (const s of opts.series) {
+    if (s.type === 'band') rows.forEach(r => { vals.push(r[s.lo], r[s.hi]); });
+    else rows.forEach((r, i) => vals.push(get(s)(i)));
+  }
+  (opts.refs || []).forEach(r => vals.push(r.y));
+  const nv = nn(vals); if (!nv.length) { host.innerHTML = '<div class="empty-chart">No data in this range</div>'; return; }
+  let lo = opts.yMin ?? Math.min(...nv), hi = opts.yMax ?? Math.max(...nv);
+  if (opts.yMin == null) lo = lo - (hi - lo) * 0.08;
+  const ticks = niceTicks(lo, hi); lo = ticks[0]; hi = ticks[ticks.length - 1];
+  const W = Math.max(280, host.clientWidth || 600), H = opts.height || 220;
+  const m = { l: 44, r: 10, t: 10, b: 24 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, n = rows.length, step = iw / n;
+  const X = i => m.l + step * (i + 0.5), Y = v => m.t + ih - (v - lo) / (hi - lo) * ih;
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': opts.aria || '' }, host);
+  for (const t of ticks) {
+    el('line', { x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t), class: 'gl' }, svg);
+    const tx = el('text', { x: m.l - 6, y: Y(t) + 4, 'text-anchor': 'end' }, svg); tx.textContent = opts.yFmt ? opts.yFmt(t) : fmt(t, t % 1 ? 1 : 0);
+  }
+  // x ticks
+  const want = Math.max(2, Math.floor(iw / 80)), every = Math.max(1, Math.ceil(n / want));
+  for (let i = 0; i < n; i++) {
+    const lab = opts.xTicks ? opts.xTicks(i, every) : (i % every === 0 ? opts.labels(i) : null);
+    if (lab == null) continue;
+    const tx = el('text', { x: X(i), y: H - 6, 'text-anchor': 'middle' }, svg); tx.textContent = lab;
+  }
+  for (const s of opts.series) {
+    const g = get(s);
+    if (s.type === 'bar') {
+      const gap = step > 5 ? 2 : step > 2.5 ? 1 : 0, w = Math.max(1, step - gap);
+      const y0 = Y(Math.max(lo, 0));
+      let path = '';
+      for (let i = 0; i < n; i++) {
+        const v = g(i); if (v == null) continue;
+        const x = X(i) - w / 2;
+        path += w >= 6 ? topRoundedBar(x, y0, w, Y(v)) : `M${x},${y0}V${Y(v)}H${x + w}V${y0}Z`;
+      }
+      if (s.colorFn) {
+        for (let i = 0; i < n; i++) { const v = g(i); if (v == null) continue; const x = X(i) - w / 2; el('path', { d: w >= 6 ? topRoundedBar(x, y0, w, Y(v)) : `M${x},${y0}V${Y(v)}H${x + w}V${y0}Z`, fill: s.colorFn(i) }, svg); }
+      } else el('path', { d: path, fill: s.color, opacity: s.opacity ?? 1 }, svg);
+      if (s.valueLabels) for (let i = 0; i < n; i++) { const v = g(i); if (v == null) continue; const t = el('text', { x: X(i), y: Y(v) - 6, 'text-anchor': 'middle' }, svg); t.textContent = s.valueLabels(v); t.style.fill = 'var(--ink-2)'; }
+    } else if (s.type === 'band') {
+      let d = '', seg = [];
+      const flush = () => { if (seg.length) { d += 'M' + seg.map(i => `${X(i)},${Y(rows[i][s.hi])}`).join('L') + 'L' + seg.slice().reverse().map(i => `${X(i)},${Y(rows[i][s.lo])}`).join('L') + 'Z'; seg = []; } };
+      for (let i = 0; i < n; i++) { if (rows[i][s.lo] == null || rows[i][s.hi] == null) flush(); else seg.push(i); }
+      flush();
+      el('path', { d, fill: s.color }, svg);
+    } else {
+      let d = '', pen = false;
+      for (let i = 0; i < n; i++) { const v = g(i); if (v == null) { pen = false; continue; } d += (pen ? 'L' : 'M') + X(i) + ',' + Y(v); pen = true; }
+      el('path', { d, fill: 'none', stroke: s.color, 'stroke-width': s.width || 2, 'stroke-dasharray': s.dash || '', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
+      if (s.points) for (let i = 0; i < n; i++) { const v = g(i); if (v == null) continue; el('circle', { cx: X(i), cy: Y(v), r: 4.5, fill: s.color, stroke: 'var(--surface)', 'stroke-width': 2 }, svg); }
+    }
+  }
+  if (opts.zeroLine && lo < 0 && hi > 0) el('line', { x1: m.l, x2: W - m.r, y1: Y(0), y2: Y(0), stroke: 'var(--ink-3)', 'stroke-width': 1 }, svg);
+  for (const r of opts.refs || []) {
+    el('line', { x1: m.l, x2: W - m.r, y1: Y(r.y), y2: Y(r.y), stroke: 'var(--ink-2)', 'stroke-width': 1.5, 'stroke-dasharray': '5 4' }, svg);
+    const tx = el('text', { x: W - m.r - 4, y: Y(r.y) - 5, 'text-anchor': 'end' }, svg); tx.textContent = r.label; tx.style.fill = 'var(--ink-2)';
+  }
+  // hover layer
+  if (!opts.tip) return;
+  const cross = el('line', { y1: m.t, y2: m.t + ih, stroke: 'var(--ink-3)', 'stroke-width': 1, visibility: 'hidden' }, svg);
+  const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; host.appendChild(tip);
+  const hit = el('rect', { x: m.l, y: m.t, width: iw, height: ih, fill: 'transparent' }, svg);
+  const move = ev => {
+    const bb = svg.getBoundingClientRect(), sx = (ev.clientX - bb.left) * W / bb.width;
+    const i = Math.max(0, Math.min(n - 1, Math.floor((sx - m.l) / step)));
+    const html = opts.tip(i); if (!html) { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); return; }
+    cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('visibility', 'visible');
+    tip.innerHTML = html; tip.hidden = false;
+    const px = X(i) * bb.width / W, tw = tip.offsetWidth;
+    tip.style.left = Math.max(tw / 2, Math.min(bb.width - tw / 2, px)) + 'px';
+    tip.style.top = (m.t + 10) + 'px';
+  };
+  hit.addEventListener('pointermove', move); hit.addEventListener('pointerdown', move);
+  hit.addEventListener('pointerleave', () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+}
+const dateTicks = rows => (i, every) => {
+  if (rows.length > 120) { const d = rows[i].date; return d.slice(8, 10) === '01' && (+d.slice(5, 7) - 1) % Math.max(1, Math.round(rows.length / 365 * 2)) === 0 ? MONTHS[+d.slice(5, 7) - 1] + (d.slice(5, 7) === '01' ? ' ' + d.slice(2, 4) : '') : null; }
+  return i % every === 0 ? fmtDate(rows[i].date) : null;
+};
+
+// ---------- rendering ----------
+function rangeRows() {
+  const d = state.days; if (!state.range) return d;
+  return d.slice(Math.max(0, d.length - state.range));
+}
+function windowAvg(rows, key, from, to) { return mean(rows.slice(Math.max(0, from), Math.max(0, to)).map(r => r[key])); }
+
+function render() {
+  const days = state.days, rows = rangeRows();
+  $('#dataBadge').textContent = state.sample ? 'Example data' : 'Your data';
+  $('#dataBadge').classList.toggle('sample', state.sample);
+  $('#onset').value = state.onset || '';
+  if (!rows.length) return;
+  $('#rangeLabel').textContent = `${fmtDateY(rows[0].date)} to ${fmtDateY(rows[rows.length - 1].date)}`;
+  const imperial = state.meta.imperial;
+  const distU = imperial ? 'mi' : 'km', distF = imperial ? 1 / 1.609344 : 1;
+
+  // --- KPIs: last 30 vs previous 30 (within all data, ending at range end)
+  const endI = days.length, L = days.slice(endI - 30), P = days.slice(Math.max(0, endI - 60), endI - 30);
+  const kp = (key) => [mean(L.map(r => r[key])), mean(P.map(r => r[key]))];
+  const kpis = [
+    { label: 'Avg daily steps', key: 'steps', d: 0, better: 0, color: 'var(--steps)' },
+    { label: 'Resting HR', key: 'rhr', d: 0, unit: 'bpm', better: -1, color: 'var(--hr)' },
+    { label: 'HRV (SDNN)', key: 'hrv', d: 0, unit: 'ms', better: 1, color: 'var(--hrv)' },
+    { label: 'Above threshold', key: 'atMin', d: 0, unit: 'min/day', better: -1, color: 'var(--hr)' },
+    { label: 'Sleep', key: 'sleep', d: 1, unit: 'h', better: 0, color: 'var(--sleep)' },
+  ];
+  const strained = L.filter(r => r.status === 'strain' || r.status === 'crash').length;
+  const strainedP = P.filter(r => r.status === 'strain' || r.status === 'crash').length;
+  $('#kpis').innerHTML = kpis.map(k => {
+    const [a, b] = kp(k.key); const diff = a != null && b != null ? a - b : null;
+    const dir = diff == null || Math.abs(diff) < (k.d ? 0.1 : 0.5) ? '' : diff > 0 ? '▲' : '▼';
+    const verdict = !dir || !k.better ? '' : (Math.sign(diff) === k.better ? ' · better' : ' · worse');
+    return `<div class="kpi"><span class="eyebrow"><span class="dot" style="background:${k.color}"></span> ${k.label}</span>
+      <span class="v">${fmt(a, k.d)}${k.unit ? `<small>${k.unit}</small>` : ''}</span>
+      <span class="d">${dir} <b>${sign(diff, k.d)}</b> vs prior 30 days${verdict}</span></div>`;
+  }).join('') + `<div class="kpi"><span class="eyebrow"><span class="dot" style="background:var(--serious)"></span> Strained days</span>
+      <span class="v">${strained}<small>of 30</small></span>
+      <span class="d">${strainedP} in the prior 30 days${strained !== strainedP ? (strained < strainedP ? ' · better' : ' · worse') : ''}</span></div>`;
+
+  // --- Calendar
+  drawCalendar(rows);
+
+  // --- Envelope
+  const recent = rows.slice(-60);
+  const tolerated = [];
+  const ri0 = days.length - rows.length;
+  rows.forEach((r, j) => {
+    const i = ri0 + j; if (r.steps == null) return;
+    const nx = days.slice(i + 1, i + 3).map(x => x.score).filter(v => v != null);
+    if (nx.length && Math.max(...nx) === 0 && j >= rows.length - 60) tolerated.push(r.steps);
+  });
+  const envelope = tolerated.length >= 5 ? Math.round(quantile(tolerated, .75) / 100) * 100 : null;
+  $('#envNote').textContent = envelope
+    ? `Comfort ceiling ≈ ${fmt(envelope)} steps: 3 in 4 days that were followed by two stable days stayed under this, in the last ${Math.min(60, rows.length)} days. Staying under it on most days is a reasonable pacing target.`
+    : 'Not enough resting HR and HRV data yet to estimate a comfort ceiling.';
+  rows.forEach((r, j) => { const w = rows.slice(Math.max(0, j - 6), j + 1).map(x => x.steps); r.steps7 = nn(w).length >= 4 ? mean(w) : null; });
+  drawChart($('#cSteps'), {
+    rows, height: 240, yMin: 0, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Daily steps',
+    series: [{ key: 'steps', type: 'bar', color: 'var(--steps)', opacity: .85 }, { key: 'steps7', type: 'line', color: 'var(--ink-2)' }],
+    refs: envelope ? [{ y: envelope, label: `ceiling ${fmt(envelope)}` }] : [],
+    tip: i => { const r = rows[i]; return `${fmtDateY(r.date)}<br><b>Steps</b> ${fmt(r.steps)}<br><b>7-day avg</b> ${fmt(r.steps7)}${r.status ? `<br><b>Status</b> ${STATUS[r.status].label}` : ''}${r.exertion ? '<br>Exertion day' : ''}`; },
+  });
+
+  // --- buckets
+  const pairs = [];
+  rows.forEach((r, j) => {
+    const i = ri0 + j; if (r.steps == null) return;
+    const nx = days.slice(i + 1, i + 3).map(x => x.status).filter(Boolean); if (!nx.length) return;
+    pairs.push({ steps: r.steps, bad: nx.some(s => s === 'strain' || s === 'crash') });
+  });
+  const bucketRows = [];
+  if (pairs.length >= 15) {
+    const qs = [0.2, 0.4, 0.6, 0.8].map(q => Math.round(quantile(pairs.map(p => p.steps), q) / 250) * 250);
+    const edges = [0, ...new Set(qs), Infinity];
+    for (let b = 0; b < edges.length - 1; b++) {
+      const inB = pairs.filter(p => p.steps >= edges[b] && p.steps < edges[b + 1]); if (!inB.length) continue;
+      bucketRows.push({ label: edges[b + 1] === Infinity ? `${fmt(edges[b] / 1000, 1)}k+` : `<${fmt(edges[b + 1] / 1000, 1)}k`, range: edges[b + 1] === Infinity ? `${fmt(edges[b])}+ steps` : `${fmt(edges[b])} to ${fmt(edges[b + 1])} steps`, rate: inB.filter(p => p.bad).length / inB.length * 100, n: inB.length });
+    }
+  }
+  drawChart($('#cBuckets'), {
+    rows: bucketRows, height: 200, yMin: 0, yMax: Math.max(20, ...bucketRows.map(b => b.rate)), yFmt: v => v + '%',
+    labels: i => bucketRows[i].label, xTicks: i => bucketRows[i].label, aria: 'Strain rate by step bucket',
+    series: [{ key: 'rate', type: 'bar', color: 'var(--steps)', valueLabels: v => fmt(v) + '%' }],
+    tip: i => { const b = bucketRows[i]; return `${b.range}<br><b>Strain next 48 h</b> ${fmt(b.rate)}%<br><b>Days</b> ${b.n}`; },
+  });
+
+  // --- event study
+  const events = [];
+  rows.forEach((r, j) => { if (r.exertion) events.push(ri0 + j); });
+  const offs = [-1, 0, 1, 2, 3, 4];
+  const evRows = offs.map(o => {
+    const deltas = events.map(i => { const e = days[i], x = days[i + o]; return x && x.rhr != null && e.rhrBase != null ? x.rhr - e.rhrBase : null; });
+    const hv = events.map(i => { const e = days[i], x = days[i + o]; return x && x.hrv != null && e.hrvBase != null ? (x.hrv / e.hrvBase - 1) * 100 : null; });
+    return { o, label: o === 0 ? 'Day of' : (o > 0 ? '+' : '') + o + 'd', rhr: mean(deltas), hrv: mean(hv), n: nn(deltas).length };
+  });
+  $('#eventNote').textContent = `Average resting HR change vs. baseline around ${events.length} day${events.length === 1 ? '' : 's'} with steps 1.5× your 14-day norm. PEM usually shows 1 to 3 days later.`;
+  drawChart($('#cEvent'), {
+    rows: events.length >= 2 ? evRows : [], height: 200, zeroLine: true, labels: i => evRows[i].label, xTicks: i => evRows[i].label, aria: 'Resting HR change after exertion',
+    yFmt: v => sign(v, v % 1 ? 1 : 0),
+    series: [{ key: 'rhr', type: 'line', color: 'var(--hr)', points: true }],
+    tip: i => { const e = evRows[i]; return `${e.label}<br><b>RHR</b> ${sign(e.rhr, 1)} bpm<br><b>HRV</b> ${sign(e.hrv, 0)}%<br><b>Events</b> ${e.n}`; },
+  });
+
+  // --- RHR / HRV
+  drawChart($('#cRHR'), {
+    rows, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Resting heart rate',
+    series: [{ key: 'rhrBase', type: 'line', color: 'var(--base)', dash: '5 4', width: 1.5 }, { key: 'rhr', type: 'line', color: 'var(--hr)' }],
+    tip: i => { const r = rows[i]; if (r.rhr == null) return null; return `${fmtDateY(r.date)}<br><b>Resting HR</b> ${fmt(r.rhr)} bpm<br><b>Baseline</b> ${fmt(r.rhrBase)} (${sign(r.rhrDelta, 1)})`; },
+  });
+  drawChart($('#cHRV'), {
+    rows, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Heart rate variability',
+    series: [{ key: 'hrvBase', type: 'line', color: 'var(--base)', dash: '5 4', width: 1.5 }, { key: 'hrv', type: 'line', color: 'var(--hrv)' }],
+    tip: i => { const r = rows[i]; if (r.hrv == null) return null; return `${fmtDateY(r.date)}<br><b>HRV</b> ${fmt(r.hrv)} ms<br><b>Baseline</b> ${fmt(r.hrvBase)} (${sign(r.hrvPct == null ? null : r.hrvPct * 100)}%)`; },
+  });
+
+  // --- HR range, AT, POTS
+  const lastAT = [...rows].reverse().find(r => r.at)?.at;
+  $('#atNote').textContent = lastAT ? `Estimated anaerobic threshold right now: ${lastAT} bpm (resting baseline + 15). Many people pacing with long COVID set a watch alert at or just below this.` : 'Heart rate samples are needed to estimate your threshold.';
+  drawChart($('#cHRRange'), {
+    rows, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Daily heart rate range',
+    series: [{ type: 'band', lo: 'hrMin', hi: 'hrMax', color: 'var(--hr-soft)' }, { key: 'hrAvg', type: 'line', color: 'var(--hr)' }],
+    tip: i => { const r = rows[i]; if (r.hrAvg == null) return null; return `${fmtDateY(r.date)}<br><b>Low</b> ${fmt(r.hrMin)} · <b>Avg</b> ${fmt(r.hrAvg)} · <b>High</b> ${fmt(r.hrMax)}`; },
+  });
+  drawChart($('#cAT'), {
+    rows, height: 190, yMin: 0, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Minutes above anaerobic threshold',
+    series: [{ key: 'atMin', type: 'bar', color: 'var(--hr)' }],
+    tip: i => { const r = rows[i]; if (r.atMin == null) return null; return `${fmtDateY(r.date)}<br><b>Above ${r.at} bpm</b> ${fmt(r.atMin)} min`; },
+  });
+  drawChart($('#cPOTS'), {
+    rows, height: 190, yMin: 0, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Hours with high heart rate at rest',
+    series: [{ key: 'pots', type: 'bar', color: 'var(--hr)' }],
+    tip: i => { const r = rows[i]; if (r.pots == null) return null; return `${fmtDateY(r.date)}<br><b>Hours</b> ${r.pots}<br><b>Trigger</b> ≥ ${fmt((r.rhrBase ?? r.rhr) + 30)} bpm, &lt;100 steps`; },
+  });
+  const hours = Array.from({ length: 24 }, (_, h) => ({ h, hr: mean(rows.map(r => r.hHR?.[h])), steps: mean(rows.map(r => r.hSteps?.[h])) }));
+  const hourLab = h => h === 0 ? '12a' : h < 12 ? h + 'a' : h === 12 ? '12p' : (h - 12) + 'p';
+  drawChart($('#cHourHR'), {
+    rows: hours, height: 190, labels: i => hourLab(i), xTicks: (i) => i % 3 === 0 ? hourLab(i) : null, aria: 'Average heart rate by hour',
+    series: [{ key: 'hr', type: 'line', color: 'var(--hr)' }],
+    tip: i => `${hourLab(i)}<br><b>Avg HR</b> ${fmt(hours[i].hr)} bpm`,
+  });
+  drawChart($('#cHourSteps'), {
+    rows: hours, height: 190, yMin: 0, labels: i => hourLab(i), xTicks: (i) => i % 3 === 0 ? hourLab(i) : null, aria: 'Average steps by hour',
+    series: [{ key: 'steps', type: 'bar', color: 'var(--steps)' }],
+    tip: i => `${hourLab(i)}<br><b>Avg steps</b> ${fmt(hours[i].steps)}`,
+  });
+
+  // --- vitals
+  const V = [
+    { key: 'walkHR', label: 'Walking heart rate', unit: 'bpm', d: 0, better: -1, note: 'Lower means walking costs your heart less.' },
+    { key: 'hrr', label: 'HR recovery, 1 min', unit: 'bpm', d: 0, better: 1, note: 'Drop after exercise. Higher reflects better autonomic function.' },
+    { key: 'spo2', label: 'Blood oxygen', unit: '%', d: 1, better: 1, note: 'Repeated readings under 95% are worth reporting.' },
+    { key: 'resp', label: 'Respiratory rate', unit: '/min', d: 1, better: -1, note: 'Measured during sleep. A rise can precede a flare.' },
+    { key: 'vo2', label: 'Cardio fitness (VO₂ max)', unit: 'mL/kg/min', d: 1, better: 1, note: 'Estimated from outdoor walks with Apple Watch.' },
+    { key: 'sleep', label: 'Sleep', unit: 'h', d: 1, better: 0, note: 'Long sleep that does not refresh is common in PEM.' },
+    { key: 'walkSpeed', label: 'Walking speed', unit: imperial ? 'mph' : 'km/h', d: 1, better: 1, f: imperial ? 1 / 1.609344 : 1, note: 'A gait marker of overall stamina.' },
+    { key: 'dist', label: 'Walking distance', unit: distU + '/day', d: 1, better: 0, f: distF, note: 'Daily walking and running distance.' },
+    { key: 'flights', label: 'Flights climbed', unit: '/day', d: 1, better: 0, note: 'Stairs are a heavy load for many with PEM.' },
+    { key: 'exer', label: 'Exercise minutes', unit: 'min/day', d: 0, better: 0, note: 'Apple brisk-activity minutes.' },
+  ];
+  const vitHost = $('#vitals'); vitHost.innerHTML = '';
+  for (const v of V) {
+    const f = v.f || 1; const series = rows.map(r => r[v.key] == null ? null : r[v.key] * f);
+    if (!nn(series).length) continue;
+    const lst = mean(series.slice(-30)), prev = mean(series.slice(-60, -30));
+    const diff = lst != null && prev != null ? lst - prev : null;
+    const thr = v.d ? 0.1 : 0.5;
+    const dir = diff == null || Math.abs(diff) < thr ? '' : diff > 0 ? '▲' : '▼';
+    const verdict = !dir || !v.better ? '' : Math.sign(diff) === v.better ? 'better' : 'worse';
+    const card = document.createElement('div'); card.className = 'vital';
+    card.innerHTML = `<div class="row"><span class="eyebrow">${v.label}</span></div>
+      <div class="row"><span class="v">${fmt(lst, v.d)} <span class="small muted">${v.unit}</span></span><span class="small muted">${dir} ${sign(diff, v.d)}${verdict ? ' · ' + verdict : ''}</span></div>
+      <div class="chart"></div><div class="note">${v.note}</div>`;
+    vitHost.appendChild(card);
+    const sr = rows.map((r, i) => ({ date: r.date, v: series[i] }));
+    // carry sparse (weekly) metrics forward for a readable sparkline
+    let lastV = null; const sparse = nn(series).length < rows.length * 0.4;
+    if (sparse) sr.forEach(x => { if (x.v != null) lastV = x.v; else x.v = lastV; });
+    drawSpark(card.querySelector('.chart'), sr, v);
+  }
+
+  // --- events table
+  const evHtml = events.slice().reverse().map(i => {
+    const e = days[i], nx = days.slice(i + 1, i + 4);
+    const sc = nn(nx.map(x => x.score)); const worst = sc.length ? Math.max(...sc) : null;
+    const st = worst == null ? null : worst >= 2 ? (nx.some(x => x.status === 'crash') ? 'crash' : 'strain') : worst === 1 ? 'watch' : 'ok';
+    const peak = nn(nx.map(x => x.rhr != null && e.rhrBase != null ? x.rhr - e.rhrBase : null));
+    const hv = nn(nx.map(x => x.hrv != null && e.hrvBase != null ? (x.hrv / e.hrvBase - 1) * 100 : null));
+    const after = mean(nx.map(x => x.steps));
+    const outcome = st == null ? '–' : st === 'ok' ? 'Tolerated' : st === 'watch' ? 'Mild signs' : st === 'crash' ? 'Crash' : 'Likely PEM';
+    return `<tr><td>${fmtDateY(e.date)}</td><td class="num">${fmt(e.steps)}</td><td class="num">${fmt(e.steps / e.steps14, 1)}×</td>
+      <td class="num">${peak.length ? sign(Math.max(...peak), 1) : '–'}</td><td class="num">${hv.length ? sign(Math.min(...hv)) + '%' : '–'}</td>
+      <td class="num">${fmt(after)}</td><td>${st ? `<span class="pill"><span class="dot" style="background:${STATUS[st].color}"></span>${outcome}</span>` : '–'}</td></tr>`;
+  }).join('');
+  $('#eventsTbl').innerHTML = `<thead><tr><th>Date</th><th class="num">Steps</th><th class="num">vs norm</th><th class="num">Peak RHR Δ (3d)</th><th class="num">Lowest HRV Δ</th><th class="num">Avg steps after</th><th>Outcome</th></tr></thead><tbody>${evHtml || '<tr><td colspan="7" class="muted">No exertion days in this range.</td></tr>'}</tbody>`;
+
+  // --- weekly table
+  const weeks = new Map();
+  for (const r of rows) { const wk = addDays(r.date, -((WEEKDAY(r.date) + 6) % 7)); if (!weeks.has(wk)) weeks.set(wk, []); weeks.get(wk).push(r); }
+  const wkRows = [...weeks.entries()].reverse().map(([wk, rs]) => {
+    const bad = rs.filter(r => r.status === 'strain' || r.status === 'crash').length;
+    return `<tr><td>${fmtDateY(wk)}</td><td class="num">${fmt(mean(rs.map(r => r.steps)))}</td><td class="num">${fmt(mean(rs.map(r => r.rhr)), 1)}</td><td class="num">${fmt(mean(rs.map(r => r.hrv)))}</td><td class="num">${fmt(mean(rs.map(r => r.hrAvg)))}</td><td class="num">${fmt(mean(rs.map(r => r.atMin)))}</td><td class="num">${fmt(rs.reduce((s, r) => s + (r.pots || 0), 0))}</td><td class="num">${fmt(mean(rs.map(r => r.sleep)), 1)}</td><td class="num">${bad}</td></tr>`;
+  }).join('');
+  $('#weekTbl').innerHTML = `<thead><tr><th>Week of</th><th class="num">Steps/day</th><th class="num">Resting HR</th><th class="num">HRV</th><th class="num">Avg HR</th><th class="num">Min &gt; AT/day</th><th class="num">High-HR still hrs</th><th class="num">Sleep h</th><th class="num">Strained days</th></tr></thead><tbody>${wkRows}</tbody>`;
+  $('#dayTbl').innerHTML = `<thead><tr><th>Date</th><th class="num">Steps</th><th class="num">RHR</th><th class="num">HRV</th><th class="num">HR low/avg/high</th><th class="num">Min &gt; AT</th><th class="num">Sleep</th><th>Status</th></tr></thead><tbody>${rows.slice().reverse().map(r => `<tr><td>${fmtDateY(r.date)}</td><td class="num">${fmt(r.steps)}</td><td class="num">${fmt(r.rhr)}</td><td class="num">${fmt(r.hrv)}</td><td class="num">${r.hrAvg == null ? '–' : `${fmt(r.hrMin)}/${fmt(r.hrAvg)}/${fmt(r.hrMax)}`}</td><td class="num">${fmt(r.atMin)}</td><td class="num">${fmt(r.sleep, 1)}</td><td>${r.status ? STATUS[r.status].label : '–'}</td></tr>`).join('')}</tbody>`;
+
+  renderRecovery();
+  renderInsights(rows, { envelope, events, evRows, hours, strained, strainedP, L, P });
+}
+
+function drawSpark(host, sr, v) {
+  const vals = nn(sr.map(x => x.v)); if (!vals.length) return;
+  drawChart(host, {
+    rows: sr, height: 70, labels: () => null, xTicks: () => null, yFmt: () => '', aria: v.label,
+    series: [{ key: 'v', type: 'line', color: 'var(--accent)', width: 1.5 }],
+    tip: i => sr[i].v == null ? null : `${fmtDate(sr[i].date)} · ${fmt(sr[i].v, v.d)} ${v.unit}`,
+  });
+  const svg = host.querySelector('svg'); if (svg) svg.querySelectorAll('.gl').forEach(g => g.remove());
+}
+
+function drawCalendar(rows) {
+  const host = $('#cal'); host.innerHTML = '';
+  const first = rows[0].date, pad = WEEKDAY(first);
+  const cells = [...Array(pad).fill(null), ...rows];
+  const weeks = Math.ceil(cells.length / 7), cs = 14, g = 3, top = 16, left = 26;
+  const W = left + weeks * (cs + g), H = top + 7 * (cs + g);
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': 'Daily status calendar' }, host);
+  svg.style.width = W + 'px';
+  ['S', 'M', 'T', 'W', 'T', 'F', 'S'].forEach((d, i) => { if (i % 2) { const t = el('text', { x: 0, y: top + i * (cs + g) + 11 }, svg); t.textContent = d; } });
+  let lastMonth = '';
+  const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; host.appendChild(tip);
+  cells.forEach((r, k) => {
+    if (!r) return;
+    const wx = Math.floor(k / 7), dy = k % 7, x = left + wx * (cs + g), y = top + dy * (cs + g);
+    const mo = r.date.slice(0, 7);
+    if (mo !== lastMonth && dy <= 1) { lastMonth = mo; const t = el('text', { x, y: 11 }, svg); t.textContent = MONTHS[+mo.slice(5) - 1]; }
+    else if (mo !== lastMonth && dy > 1 && wx + 1 < weeks) { /* label at next column */ }
+    const fill = r.status ? STATUS[r.status].color : 'var(--nodata)';
+    const c = el('rect', { x, y, width: cs, height: cs, rx: 3, fill, tabindex: 0 }, svg);
+    if (r.status === 'crash') { const t = el('text', { x: x + cs / 2, y: y + 10.5, 'text-anchor': 'middle' }, svg); t.textContent = '×'; t.style.fill = '#fff'; t.style.fontSize = '10px'; t.style.pointerEvents = 'none'; }
+    const show = () => {
+      const s = r.status ? STATUS[r.status].label : 'No RHR/HRV data';
+      tip.innerHTML = `${fmtDateY(r.date)} · ${s}<br><b>Steps</b> ${fmt(r.steps)}<br><b>RHR</b> ${fmt(r.rhr)} (${sign(r.rhrDelta, 1)})<br><b>HRV</b> ${fmt(r.hrv)} (${r.hrvPct == null ? '–' : sign(r.hrvPct * 100) + '%'})`;
+      tip.hidden = false; tip.style.left = Math.max(tip.offsetWidth / 2, x + cs / 2 - host.scrollLeft) + 'px'; tip.style.top = y + 'px';
+    };
+    c.addEventListener('pointerenter', show); c.addEventListener('focus', show);
+    c.addEventListener('pointerleave', () => tip.hidden = true); c.addEventListener('blur', () => tip.hidden = true);
+  });
+  host.scrollLeft = host.scrollWidth;
+}
+
+function renderRecovery() {
+  const panel = $('#recoveryPanel'), on = state.onset, days = state.days;
+  if (!on || !days.length || on <= days[0].date) { panel.hidden = !on; if (on) $('#recoveryTbl').innerHTML = '<tbody><tr><td class="muted">Your data starts after this onset date, so there is no pre-illness baseline to compare against.</td></tr></tbody>'; return; }
+  panel.hidden = false;
+  const oi = days.findIndex(d => d.date >= on); if (oi < 0) { $('#recoveryTbl').innerHTML = '<tbody><tr><td class="muted">Onset date is after your latest data.</td></tr></tbody>'; return; }
+  const pre = days.slice(Math.max(0, oi - 90), oi), post = days.slice(oi), now = days.slice(-30);
+  const M = [
+    { key: 'steps', label: 'Daily steps', d: 0, better: 1 },
+    { key: 'rhr', label: 'Resting HR', d: 1, better: -1, unit: 'bpm' },
+    { key: 'hrv', label: 'HRV', d: 0, better: 1, unit: 'ms' },
+    { key: 'walkHR', label: 'Walking HR', d: 0, better: -1, unit: 'bpm' },
+    { key: 'atMin', label: 'Minutes above threshold', d: 0, better: -1 },
+    { key: 'vo2', label: 'VO₂ max', d: 1, better: 1 },
+    { key: 'spo2', label: 'Blood oxygen', d: 1, better: 1, unit: '%' },
+    { key: 'resp', label: 'Respiratory rate', d: 1, better: -1 },
+    { key: 'walkSpeed', label: 'Walking speed', d: 1, better: 1, f: state.meta.imperial ? 1 / 1.609344 : 1 },
+  ];
+  const rowsHtml = M.map(m => {
+    const f = m.f || 1;
+    const p = mean(pre.map(r => r[m.key])); if (p == null) return '';
+    let worst = null;
+    for (let i = 0; i + 30 <= post.length; i += 3) { const a = mean(post.slice(i, i + 30).map(r => r[m.key])); if (a == null) continue; if (worst == null || (m.better > 0 ? a < worst : a > worst)) worst = a; }
+    const n = mean(now.map(r => r[m.key])); if (n == null || worst == null) return '';
+    const gap = p - worst; const pct = Math.abs(gap) < 1e-9 ? null : Math.max(0, Math.min(150, (n - worst) / gap * 100));
+    return `<tr><td>${m.label}</td><td class="num">${fmt(p * f, m.d)}</td><td class="num">${fmt(worst * f, m.d)}</td><td class="num">${fmt(n * f, m.d)}</td>
+      <td>${pct == null ? '–' : `<span class="meter"><i style="width:${Math.min(100, pct)}%"></i></span> <span class="mono">${fmt(pct)}%</span>`}</td></tr>`;
+  }).join('');
+  $('#recoveryTbl').innerHTML = `<thead><tr><th>Measure</th><th class="num">Pre-illness</th><th class="num">Low point</th><th class="num">Last 30 days</th><th>Recovered</th></tr></thead><tbody>${rowsHtml || '<tr><td colspan="5" class="muted">Not enough data on both sides of the onset date.</td></tr>'}</tbody>`;
+}
+
+function renderInsights(rows, ctx) {
+  const out = []; const add = (color, icon, html) => out.push(`<li><span class="ic" style="background:${color}">${icon}</span><span>${html}</span></li>`);
+  const { envelope, events, evRows, hours, strained, strainedP } = ctx;
+  const days = state.days;
+  // Current state
+  const last3 = days.slice(-3).filter(r => r.status);
+  const badRecent = last3.filter(r => r.status === 'strain' || r.status === 'crash').length;
+  if (badRecent >= 2) add(STATUS.strain.color, '!!', `<b>${badRecent} of the last 3 days were strained.</b> Resting HR and HRV point to overload. Consider a lighter day until both return to baseline.`);
+  else if (last3.length) add(STATUS.ok.color, '✓', `<b>Recent days look stable.</b> Resting HR and HRV in the last 3 days are close to your 28-day baseline.`);
+  // PEM pattern
+  const pem = events.map(i => days.slice(i + 1, i + 4)).filter(nx => nx.some(x => x.status === 'strain' || x.status === 'crash')).length;
+  if (events.length >= 2) {
+    const peak = evRows.filter(e => e.rhr != null && evRows.indexOf(e) >= 2).sort((a, b) => b.rhr - a.rhr)[0];
+    add(pem / events.length >= 0.4 ? STATUS.strain.color : STATUS.watch.color, '↯', `<b>${pem} of ${events.length} exertion days were followed by strain within 72 hours.</b>${peak && peak.rhr > 1 ? ` Resting HR peaks ${peak.o} day${peak.o === 1 ? '' : 's'} later at ${sign(peak.rhr, 1)} bpm on average, a delayed pattern typical of PEM.` : ''}`);
+  }
+  if (envelope) add('var(--steps)', '≈', `<b>Comfort ceiling ≈ ${fmt(envelope)} steps/day.</b> Days under this were usually followed by stable days. Splitting activity into short bouts with rest between helps keep heart rate under threshold.`);
+  // strained trend
+  if (strained !== strainedP) add(strained < strainedP ? STATUS.ok.color : STATUS.watch.color, strained < strainedP ? '↓' : '↑', `<b>${strained} strained days in the last 30</b>, ${strained < strainedP ? 'down' : 'up'} from ${strainedP} in the 30 days before.`);
+  // POTS
+  const potsDays = rows.filter(r => r.pots > 0).length, withHR = rows.filter(r => r.pots != null).length;
+  if (withHR && potsDays / withHR >= 0.25) add(STATUS.watch.color, '♥', `<b>High heart rate while still on ${potsDays} of ${withHR} days.</b> This pattern can point to orthostatic intolerance. A 10-minute stand test (NASA lean test) at home gives your clinician useful numbers.`);
+  // RHR trend over range
+  const half = Math.floor(rows.length / 2);
+  if (rows.length >= 28) {
+    const a = mean(rows.slice(0, half).map(r => r.rhr)), b = mean(rows.slice(half).map(r => r.rhr));
+    if (a != null && b != null && Math.abs(b - a) >= 1) add(b < a ? STATUS.ok.color : STATUS.watch.color, b < a ? '↓' : '↑', `<b>Resting HR ${b < a ? 'fell' : 'rose'} ${fmt(Math.abs(b - a), 1)} bpm</b> from the first half of this range to the second (${fmt(a, 1)} → ${fmt(b, 1)}).`);
+    const ha = mean(rows.slice(0, half).map(r => r.hrv)), hb = mean(rows.slice(half).map(r => r.hrv));
+    if (ha != null && hb != null && Math.abs(hb / ha - 1) >= 0.05) add(hb > ha ? STATUS.ok.color : STATUS.watch.color, hb > ha ? '↑' : '↓', `<b>HRV ${hb > ha ? 'rose' : 'fell'} ${fmt(Math.abs(hb / ha - 1) * 100)}%</b> across the range (${fmt(ha)} → ${fmt(hb)} ms).`);
+  }
+  // Evening HR
+  const hrH = hours.map(h => h.hr); const dayMean = mean(hrH.slice(8, 20));
+  const peakH = hours.slice(6, 23).sort((a, b) => (b.hr ?? 0) - (a.hr ?? 0))[0];
+  if (peakH && dayMean && peakH.hr - dayMean >= 6) add('var(--hr)', '◷', `<b>Heart rate runs highest around ${peakH.h % 12 || 12}${peakH.h < 12 ? 'am' : 'pm'}</b> (${fmt(peakH.hr)} bpm on average). Planning rest before that hour can help.`);
+  if (!out.length) add('var(--ink-3)', 'i', 'Load more days of data to see patterns. Resting HR and HRV need at least a week to form a baseline.');
+  $('#insights').innerHTML = out.join('');
+}
+
+// ---------- wiring ----------
+function setData(raw, meta, sample, onset) {
+  state.days = derive(raw, meta); state.meta = meta; state.sample = sample;
+  if (onset && !store.get('lc_onset')) state.onset = onset;
+  if (!sample && state.onset === state.sampleOnset) state.onset = store.get('lc_onset') || '';
+  render();
+}
+function loadSample() { const s = makeSample(); state.sampleOnset = s.onset; setData(s.raw, s.meta, true, s.onset); $('#status').textContent = 'Showing example data: a made-up recovery that starts 75 days in. Load your export to replace it.'; }
+
+async function handleFile(file) {
+  if (!file) return;
+  const prog = $('#prog'), wrap = $('#progWrap'), status = $('#status');
+  wrap.hidden = false; prog.style.width = '0%'; status.className = 'small muted';
+  status.textContent = `Reading ${file.name} (${fmt(file.size / 1e6)} MB)…`;
+  const t0 = performance.now();
+  try {
+    const { raw, meta } = await parseFile(file, p => { prog.style.width = (p * 100).toFixed(1) + '%'; status.textContent = `Reading ${file.name}: ${fmt(p * 100)}%`; });
+    prog.style.width = '100%';
+    if (!raw.size) throw new Error('No steps or heart rate records were found in this file.');
+    setData(raw, meta, false);
+    status.textContent = `Loaded ${fmt(meta.count)} records covering ${fmt(state.days.length)} days in ${fmt((performance.now() - t0) / 1000, 1)} s.`;
+  } catch (e) {
+    status.className = 'err'; status.textContent = e.message || String(e);
+  } finally { setTimeout(() => { wrap.hidden = true; }, 600); }
+}
+$('#file').addEventListener('change', e => handleFile(e.target.files[0]));
+$('#sampleBtn').addEventListener('click', loadSample);
+const drop = $('#drop');
+['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
+$('#range').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.range = +b.dataset.r; store.set('lc_range', b.dataset.r);
+  $('#range').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); render();
+});
+$('#onset').addEventListener('change', e => { state.onset = e.target.value; store.set('lc_onset', state.onset); render(); });
+$('#copyCsv').addEventListener('click', async () => {
+  const cols = ['date', 'steps', 'rhr', 'rhrBase', 'hrv', 'hrvBase', 'hrMin', 'hrAvg', 'hrMax', 'at', 'atMin', 'pots', 'walkHR', 'hrr', 'spo2', 'resp', 'vo2', 'sleep', 'walkSpeed', 'dist', 'flights', 'exer', 'status', 'exertion'];
+  const csv = [cols.join(','), ...rangeRows().map(r => cols.map(c => r[c] == null ? '' : typeof r[c] === 'number' ? round(r[c], 2) : r[c]).join(','))].join('\n');
+  const btn = $('#copyCsv');
+  try { await navigator.clipboard.writeText(csv); btn.textContent = 'Copied'; }
+  catch { const ta = document.createElement('textarea'); ta.value = csv; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); btn.textContent = 'Copied'; } catch { btn.textContent = 'Copy failed'; } ta.remove(); }
+  setTimeout(() => btn.textContent = 'Copy daily data as CSV', 1800);
+});
+let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(render, 150); });
+const savedRange = store.get('lc_range');
+if (savedRange != null) { state.range = +savedRange; $('#range').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.r === savedRange)); }
+loadSample();
+</script>
