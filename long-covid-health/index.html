@@ -251,12 +251,12 @@ details[open] > summary { margin-bottom: 10px; }
   <section class="panel">
     <div class="panel-head">
       <h2>Resting heart rate and HRV</h2>
-      <p class="small muted">The two most sensitive early-warning signals for overexertion. A rising RHR or falling HRV for 2+ days is a cue to rest.</p>
+      <p class="small muted">The two most sensitive early-warning signals for overexertion. A rising RHR or falling HRV for 2+ days is a cue to rest. Resting HR is calculated from your raw heart rate: the 25th percentile of awake minutes (6am to 11pm) with no steps in the surrounding minutes. Apple's own value is used only on days without enough readings. HRV comes from Apple, since it needs beat-to-beat data.</p>
     </div>
     <div class="grid2">
       <div style="display:grid;gap:8px;min-width:0">
         <div class="chart-title"><h3>Resting HR, bpm</h3>
-          <div class="legend"><span><i style="background:var(--hr)"></i>Resting HR</span><span><i class="dash"></i>28-day baseline</span></div>
+          <div class="legend"><span><i style="background:var(--hr)"></i>Resting HR</span><span><i style="background:var(--sleep)"></i>Overnight avg</span><span><i class="dash"></i>28-day baseline</span></div>
         </div>
         <div class="chart" id="cRHR"></div>
       </div>
@@ -285,9 +285,9 @@ details[open] > summary { margin-bottom: 10px; }
         <div class="chart" id="cAT"></div>
       </div>
       <div style="display:grid;gap:8px;min-width:0">
-        <div class="chart-title"><h3>High HR while still</h3></div>
-        <p class="small muted">Hours with fewer than 100 steps but average HR 30+ bpm above resting. Frequent hours can point to orthostatic intolerance or POTS and are worth raising with a clinician.</p>
-        <div class="chart" id="cPOTS"></div>
+        <div class="chart-title"><h3>Minutes at 100+ bpm</h3></div>
+        <p class="small muted">Clinical tachycardia threshold. Hover a bar for minutes at 120+ bpm.</p>
+        <div class="chart" id="cTachy"></div>
       </div>
     </div>
     <div class="grid2">
@@ -300,6 +300,51 @@ details[open] > summary { margin-bottom: 10px; }
         <div class="chart" id="cHourSteps"></div>
       </div>
     </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Heart rate spikes and orthostatic signs</h2>
+      <p class="small muted">A spike is a rise of 30+ bpm above your average from 6 to 15 minutes earlier. A spike with under 30 steps around it happened while you were still, which is the pattern seen when standing up with POTS. Needs readings every few minutes or more often.</p>
+    </div>
+    <div class="grid2">
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>Spikes per day</h3>
+          <div class="legend"><span><i class="sq" style="background:var(--hr)"></i>While still</span><span><i class="sq" style="background:var(--base)"></i>While moving</span></div>
+        </div>
+        <div class="chart" id="cSpikes"></div>
+      </div>
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>Minutes of high HR while still</h3></div>
+        <p class="small muted">Minutes with no steps nearby and HR 30+ bpm above your resting baseline.</p>
+        <div class="chart" id="cStill"></div>
+      </div>
+    </div>
+    <div class="grid2">
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>When spikes happen</h3></div>
+        <p class="small muted">Spikes by hour of day across the range.</p>
+        <div class="chart" id="cSpikeHour"></div>
+      </div>
+      <div style="display:grid;gap:8px;min-width:0">
+        <div class="chart-title"><h3>Recent spikes</h3></div>
+        <div class="tbl-wrap" style="max-height:260px;overflow-y:auto"><table id="spikeTbl"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>One day, minute by minute</h2>
+      <label class="ctl" for="detailDay">Day <input type="date" id="detailDay"></label>
+    </div>
+    <p class="small muted" id="detailNote"></p>
+    <div class="chart-title"><h3>Heart rate, bpm (5-minute average)</h3>
+      <div class="legend"><span><i style="background:var(--hr)"></i>Heart rate</span><span><i class="dash"></i>Threshold</span></div>
+    </div>
+    <div class="chart" id="cDayHR"></div>
+    <div class="chart-title"><h3>Steps per 5 minutes</h3></div>
+    <div class="chart" id="cDaySteps"></div>
   </section>
 
   <section class="panel">
@@ -423,9 +468,11 @@ function makeLineHandler(raw, meta) {
     let v = parseFloat(valS); if (!Number.isFinite(v)) return;
     const r = getDay(raw, d); meta.count++;
     if (isSteps) {
-      const src = attr(line, 'sourceName') || '?';
-      let a = r.steps[src]; if (!a) a = r.steps[src] = new Float64Array(24);
-      a[+start.slice(11, 13)] += v;
+      let a = r.steps[srcName]; if (!a) a = r.steps[srcName] = new Float32Array(1440);
+      const m0 = +start.slice(11, 13) * 60 + +start.slice(14, 16);
+      const end = attr(line, 'endDate');
+      const span = Math.max(1, Math.min(120, 1440 - m0, end ? Math.round((tsMs(end) - tsMs(start)) / 60000) : 1));
+      for (let k = 0; k < span; k++) a[m0 + k] += v / span;
     } else if (isHR) {
       if (v < 25 || v > 250) return;
       if (!r.hrS) { r.hrS = new Float32Array(1440); r.hrN = new Uint16Array(1440); r.hrLo = 999; r.hrHi = 0; }
@@ -535,7 +582,10 @@ function derive(raw, meta) {
     if (r) {
       const srcs = Object.values(r.steps);
       if (srcs.length) {
-        o.hSteps = Array.from({ length: 24 }, (_, h) => Math.max(...srcs.map(a => a[h])));
+        const ms = new Float32Array(1440);
+        for (let m = 0; m < 1440; m++) { let mx = 0; for (const a of srcs) if (a[m] > mx) mx = a[m]; ms[m] = mx; }
+        o.mSteps = ms;
+        o.hSteps = Array.from({ length: 24 }, (_, h) => { let t = 0; for (let m = h * 60; m < h * 60 + 60; m++) t += ms[m]; return t; });
         o.steps = o.hSteps.reduce((s, v) => s + v, 0);
       }
       if (!r.hr && r.hrS) { r.hr = new Uint8Array(1440); for (let m = 0; m < 1440; m++) if (r.hrN[m]) r.hr[m] = Math.round(r.hrS[m] / r.hrN[m]); }
@@ -543,19 +593,26 @@ function derive(raw, meta) {
         let mn = 999, mx = 0, s = 0, n = 0; const hs = new Array(24).fill(0), hn = new Array(24).fill(0);
         for (let m = 0; m < 1440; m++) { const v = r.hr[m]; if (!v) continue; if (v < mn) mn = v; if (v > mx) mx = v; s += v; n++; hs[m / 60 | 0] += v; hn[m / 60 | 0]++; }
         if (n) { o.hrMin = mn; o.hrMax = mx; o.hrAvg = s / n; o.hHR = hs.map((v, i) => hn[i] ? v / hn[i] : null); o.hN = hn; o.hrMinutes = r.hr; o.hrCover = n;
-          if (r.hrS) { o.hrMin = r.hrLo; o.hrMax = r.hrHi; }
+          if (r.hrS) { o.hrMin = r.hrLo; o.hrMax = r.hrHi; let t = 0; for (let m = 0; m < 1440; m++) t += r.hrN[m]; o.hrReadings = t; }
         }
       }
       for (const k in r.mean) o[k] = r.mean[k][0] / r.mean[k][1];
-      if (o.rhr == null && o.hrMinutes) {
-        // No Apple resting HR that day: use the lowest 30-minute average of minute HR
-        let best = null;
-        for (let m0 = 0; m0 + 30 <= 1440; m0 += 5) {
-          let s = 0, n = 0; for (let m = m0; m < m0 + 30; m++) { const v = o.hrMinutes[m]; if (v) { s += v; n++; } }
-          if (n >= 6 && (best == null || s / n < best)) best = s / n;
+      o.rhrApple = o.rhr ?? null;
+      if (o.hrMinutes) {
+        const hm = o.hrMinutes, ms = o.mSteps;
+        if (ms) {
+          o.still = new Uint8Array(1440);
+          for (let m = 0; m < 1440; m++) { let t = 0; for (let k = Math.max(0, m - 5); k <= Math.min(1439, m + 2); k++) t += ms[k]; o.still[m] = t < 1 ? 1 : 0; }
         }
-        if (best != null) { o.rhr = best; o.rhrEst = true; }
-      }
+        // Calculated resting HR: 25th percentile of awake (6am-11pm) minutes with no steps nearby
+        const restV = [];
+        for (let m = 360; m < 1380; m++) if (hm[m] && (!o.still || o.still[m])) restV.push(hm[m]);
+        o.rhrCalc = restV.length >= 60 ? quantile(restV, 0.25) : null;
+        const night = []; for (let m = 0; m < 360; m++) if (hm[m]) night.push(hm[m]);
+        o.nightHR = night.length >= 30 ? mean(night) : null;
+        if (o.rhrCalc != null) { o.rhr = o.rhrCalc; o.rhrSrc = 'calc'; }
+        else if (o.rhrApple != null) o.rhrSrc = 'apple';
+      } else if (o.rhrApple != null) o.rhrSrc = 'apple';
       for (const k in r.sum) o[k] = Math.max(...Object.values(r.sum[k]));
       const sl = Object.values(r.sleep); if (sl.length) o.sleep = Math.min(16, Math.max(...sl) / 3600000);
     }
@@ -588,14 +645,40 @@ function derive(raw, meta) {
         if (last && m - lastM < 5 && last > o.at) above++;
       }
       o.atMin = above;
-      if (o.hSteps) {
-        let p = 0;
-        for (let h = 0; h < 24; h++) if (o.hHR[h] != null && o.hN[h] >= 2 && o.hSteps[h] < 100 && o.hHR[h] >= rb + 30) p++;
-        o.pots = p;
+      let t100 = 0, t120 = 0, sh = 0;
+      for (let m = 0; m < 1440; m++) {
+        const v = o.hrMinutes[m]; if (!v) continue;
+        if (v >= 100) t100++; if (v >= 120) t120++;
+        if (o.still && o.still[m] && v >= rb + 30) sh++;
+      }
+      o.tachy100 = t100; o.tachy120 = t120; o.stillHigh = o.still ? sh : null;
+      if (o.hrCover >= 600) {
+        o.spikeList = findSpikes(o.hrMinutes, o.mSteps);
+        o.spikes = o.spikeList.length;
+        o.spikesStill = o.mSteps ? o.spikeList.filter(e => e.still).length : null;
       }
     }
   }
   return days;
+}
+
+// Sudden rises: minute HR 30+ bpm above the average of the 6-15 minutes before.
+// Needs readings at least every ~3 minutes, so sparse background data yields none.
+function findSpikes(hm, ms) {
+  const ev = []; let m = 15;
+  while (m < 1440) {
+    const v = hm[m]; if (!v) { m++; continue; }
+    let s = 0, n = 0; for (let k = m - 15; k <= m - 6; k++) if (hm[k]) { s += hm[k]; n++; }
+    if (n < 3) { m++; continue; }
+    const base = s / n;
+    if (v - base < 30) { m++; continue; }
+    let end = m, peak = v, gap = 0;
+    for (let k = m + 1; k < 1440; k++) { const x = hm[k]; if (!x) { if (++gap > 2) break; continue; } gap = 0; if (x >= base + 20) { end = k; if (x > peak) peak = x; } else break; }
+    let st = 0; if (ms) for (let k = Math.max(0, m - 5); k <= end; k++) st += ms[k];
+    ev.push({ start: m, end, base, peak, dur: end - m + 1, steps: ms ? st : null, still: ms ? st < 30 : null });
+    m = end + 5;
+  }
+  return ev;
 }
 
 // ---------- example data ----------
@@ -622,18 +705,25 @@ function makeSample() {
     // fatigue from exertion relative to capacity, delayed
     const cap = post ? 2600 + 4200 * recov : 99999;
     fatigue = fatigue * 0.6 + Math.max(0, (steps - cap * 1.25) / cap) * 1.6;
-    const src = 'Apple Watch', a = r.steps[src] = new Float64Array(24);
+    const src = 'Apple Watch', a = r.steps[src] = new Float32Array(1440);
     const shape = [0,0,0,0,0,0,.2,.6,1,1.1,1.2,1.3,1.4,1.2,1,1,1.1,1.3,1.2,.9,.6,.3,.1,0];
     const tot = shape.reduce((s, v) => s + v, 0);
-    for (let h = 0; h < 24; h++) a[h] = Math.max(0, steps * shape[h] / tot * (1 + gauss() * 0.3));
+    for (let h = 0; h < 24; h++) {
+      const hs = Math.max(0, steps * shape[h] / tot * (1 + gauss() * 0.3)); if (hs < 1) continue;
+      const bout = 12 + (R() * 15 | 0), b0 = h * 60 + (R() * (60 - bout) | 0);
+      for (let k = 0; k < bout; k++) a[b0 + k] = hs / bout;
+    }
     r.hr = new Uint8Array(1440);
-    const potsy = post ? (1 - recov) * 0.5 : 0;
-    const spikeH = Array.from({ length: 24 }, (_, h) => h >= 8 && h < 22 && R() < potsy * 0.12);
-    for (let m = 0; m < 1440; m += 5) {
+    const potsy = post ? (1 - recov) : 0.05;
+    const spikeAt = new Set(); const nSp = Math.round(potsy * 4 * R() + R() * 0.6);
+    for (let k = 0; k < nSp; k++) spikeAt.add(480 + (R() * 780 | 0));
+    let spikeLeft = 0, spikeAmp = 0;
+    for (let m = 0; m < 1440; m++) {
       const h = m / 60 | 0, asleep = h < 6 || h >= 23;
-      let v = rhr + (asleep ? -3 : 4) + a[h] / 60 * 0.5 + gauss() * 3;
-      if (spikeH[h]) { v += 34 + R() * 8; a[h] = Math.min(a[h], 60); }
-      else if (!asleep && R() < 0.04) v += 25 + R() * 30;
+      if (spikeAt.has(m) && a[m] === 0) { spikeLeft = 5 + (R() * 8 | 0); spikeAmp = 32 + R() * 15; }
+      let walk = 0; for (let k = Math.max(0, m - 3); k <= m; k++) walk += a[k];
+      let v = rhr + (asleep ? -4 : 5) + Math.min(45, walk / 4 * 0.3) + gauss() * 2.5;
+      if (spikeLeft > 0) { v += spikeAmp; spikeLeft--; }
       r.hr[m] = Math.max(40, Math.min(200, Math.round(v)));
     }
     r.mean.rhr = [rhr, 1]; r.mean.hrv = [hrv, 1];
@@ -761,6 +851,40 @@ const dateTicks = rows => (i, every) => {
 };
 
 // ---------- rendering ----------
+const hourLab = h => h === 0 ? '12a' : h < 12 ? h + 'a' : h === 12 ? '12p' : (h - 12) + 'p';
+const clock = m => { const h = m / 60 | 0, mm = String(m % 60).padStart(2, '0'); return `${h % 12 || 12}:${mm}${h < 12 ? 'am' : 'pm'}`; };
+function renderDayDetail() {
+  const days = state.days; if (!days.length) return;
+  const inp = $('#detailDay'); inp.min = days[0].date; inp.max = days[days.length - 1].date;
+  if (!inp.value || inp.value < inp.min || inp.value > inp.max) {
+    const withHR = [...days].reverse().find(d => d.hrMinutes); inp.value = (withHR || days[days.length - 1]).date;
+  }
+  const r = days.find(x => x.date === inp.value) || {};
+  const bins = Array.from({ length: 288 }, (_, b) => {
+    let s = 0, n = 0, st = 0;
+    for (let m = b * 5; m < b * 5 + 5; m++) { const v = r.hrMinutes?.[m]; if (v) { s += v; n++; } st += r.mSteps?.[m] || 0; }
+    return { b, hr: n ? s / n : null, steps: r.mSteps ? st : null };
+  });
+  // bridge short gaps so sparse readings still draw a line
+  let last = null, gap = 0; bins.forEach(x => { if (x.hr != null) { last = x.hr; gap = 0; } else if (last != null && ++gap <= 2) x.hrFill = last; });
+  bins.forEach(x => x.hrLine = x.hr ?? x.hrFill ?? null);
+  const sp = r.spikeList || [];
+  $('#detailNote').innerHTML = r.hrMinutes
+    ? `${fmtDateY(r.date)}: ${fmt(r.hrReadings ?? r.hrCover)} heart rate readings over ${fmt(r.hrCover)} minutes · resting ${fmt(r.rhr)} bpm · ${fmt(r.tachy100)} min at 100+ · ${sp.length} spike${sp.length === 1 ? '' : 's'}${sp.length ? ` (${sp.map(e => clock(e.start) + (e.still ? ' still' : '')).join(', ')})` : ''}`
+    : 'No heart rate readings on this day.';
+  const tickT = i => i % 36 === 0 ? hourLab(i / 12) : null;
+  drawChart($('#cDayHR'), {
+    rows: r.hrMinutes ? bins : [], height: 220, labels: i => clock(i * 5), xTicks: tickT, aria: 'Heart rate across the selected day',
+    series: [{ key: 'hrLine', type: 'line', color: 'var(--hr)', width: 1.5 }],
+    refs: r.at ? [{ y: r.at, label: `threshold ${r.at}` }] : [],
+    tip: i => bins[i].hrLine == null ? null : `${clock(i * 5)}–${clock(i * 5 + 5)}<br><b>HR</b> ${fmt(bins[i].hrLine)} bpm<br><b>Steps</b> ${fmt(bins[i].steps)}`,
+  });
+  drawChart($('#cDaySteps'), {
+    rows: r.mSteps ? bins : [], height: 120, yMin: 0, labels: i => clock(i * 5), xTicks: tickT, aria: 'Steps across the selected day',
+    series: [{ key: 'steps', type: 'bar', color: 'var(--steps)' }],
+    tip: i => `${clock(i * 5)}–${clock(i * 5 + 5)}<br><b>Steps</b> ${fmt(bins[i].steps)}`,
+  });
+}
 function rangeRows() {
   const d = state.days; if (!state.range) return d;
   return d.slice(Math.max(0, d.length - state.range));
@@ -785,6 +909,7 @@ function render() {
     { label: 'Resting HR', key: 'rhr', d: 0, unit: 'bpm', better: -1, color: 'var(--hr)' },
     { label: 'HRV (SDNN)', key: 'hrv', d: 0, unit: 'ms', better: 1, color: 'var(--hrv)' },
     { label: 'Above threshold', key: 'atMin', d: 0, unit: 'min/day', better: -1, color: 'var(--hr)' },
+    { label: 'Spikes while still', key: 'spikesStill', d: 1, unit: '/day', better: -1, color: 'var(--hr)' },
     { label: 'Sleep', key: 'sleep', d: 1, unit: 'h', better: 0, color: 'var(--sleep)' },
   ];
   const strained = L.filter(r => r.status === 'strain' || r.status === 'crash').length;
@@ -867,8 +992,8 @@ function render() {
   // --- RHR / HRV
   drawChart($('#cRHR'), {
     rows, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Resting heart rate',
-    series: [{ key: 'rhrBase', type: 'line', color: 'var(--base)', dash: '5 4', width: 1.5 }, { key: 'rhr', type: 'line', color: 'var(--hr)' }],
-    tip: i => { const r = rows[i]; if (r.rhr == null) return null; return `${fmtDateY(r.date)}<br><b>Resting HR</b> ${fmt(r.rhr)} bpm${r.rhrEst ? ' (estimated)' : ''}<br><b>Baseline</b> ${fmt(r.rhrBase)} (${sign(r.rhrDelta, 1)})`; },
+    series: [{ key: 'rhrBase', type: 'line', color: 'var(--base)', dash: '5 4', width: 1.5 }, { key: 'nightHR', type: 'line', color: 'var(--sleep)', width: 1.5 }, { key: 'rhr', type: 'line', color: 'var(--hr)' }],
+    tip: i => { const r = rows[i]; if (r.rhr == null && r.nightHR == null) return null; return `${fmtDateY(r.date)}<br><b>Resting HR</b> ${fmt(r.rhr)} bpm${r.rhrSrc === 'apple' ? ' (Apple)' : ''}<br><b>Apple's value</b> ${fmt(r.rhrApple)}<br><b>Overnight</b> ${fmt(r.nightHR)}<br><b>Baseline</b> ${fmt(r.rhrBase)} (${sign(r.rhrDelta, 1)})`; },
   });
   drawChart($('#cHRV'), {
     rows, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Heart rate variability',
@@ -889,13 +1014,34 @@ function render() {
     series: [{ key: 'atMin', type: 'bar', color: 'var(--hr)' }],
     tip: i => { const r = rows[i]; if (r.atMin == null) return null; return `${fmtDateY(r.date)}<br><b>Above ${r.at} bpm</b> ${fmt(r.atMin)} min`; },
   });
-  drawChart($('#cPOTS'), {
-    rows, height: 190, yMin: 0, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Hours with high heart rate at rest',
-    series: [{ key: 'pots', type: 'bar', color: 'var(--hr)' }],
-    tip: i => { const r = rows[i]; if (r.pots == null) return null; return `${fmtDateY(r.date)}<br><b>Hours</b> ${r.pots}<br><b>Trigger</b> ≥ ${fmt((r.rhrBase ?? r.rhr) + 30)} bpm, &lt;100 steps`; },
+  drawChart($('#cTachy'), {
+    rows, height: 190, yMin: 0, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Minutes at 100 bpm or more',
+    series: [{ key: 'tachy100', type: 'bar', color: 'var(--hr)' }],
+    tip: i => { const r = rows[i]; if (r.tachy100 == null) return null; return `${fmtDateY(r.date)}<br><b>100+ bpm</b> ${fmt(r.tachy100)} min<br><b>120+ bpm</b> ${fmt(r.tachy120)} min`; },
   });
+  rows.forEach(r => { r.spikesMoving = r.spikes == null ? null : r.spikes - (r.spikesStill || 0); r.spikesStack = r.spikes; });
+  drawChart($('#cSpikes'), {
+    rows, height: 200, yMin: 0, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Heart rate spikes per day',
+    series: [{ key: 'spikesStack', type: 'bar', color: 'var(--base)' }, { key: 'spikesStill', type: 'bar', color: 'var(--hr)' }],
+    tip: i => { const r = rows[i]; if (r.spikes == null) return null; return `${fmtDateY(r.date)}<br><b>Spikes</b> ${r.spikes}<br><b>While still</b> ${fmt(r.spikesStill)}<br><b>While moving</b> ${fmt(r.spikesMoving)}`; },
+  });
+  drawChart($('#cStill'), {
+    rows, height: 200, yMin: 0, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Minutes of high heart rate while still',
+    series: [{ key: 'stillHigh', type: 'bar', color: 'var(--hr)' }],
+    tip: i => { const r = rows[i]; if (r.stillHigh == null) return null; return `${fmtDateY(r.date)}<br><b>Minutes</b> ${fmt(r.stillHigh)}<br><b>Trigger</b> ≥ ${fmt((r.rhrBase ?? r.rhr) + 30)} bpm, no steps`; },
+  });
+  const allSpikes = [];
+  rows.forEach(r => (r.spikeList || []).forEach(e => allSpikes.push({ ...e, date: r.date })));
+  const spikeHours = Array.from({ length: 24 }, (_, h) => ({ h, still: allSpikes.filter(e => (e.start / 60 | 0) === h && e.still !== false).length, all: allSpikes.filter(e => (e.start / 60 | 0) === h).length }));
+  drawChart($('#cSpikeHour'), {
+    rows: allSpikes.length ? spikeHours : [], height: 190, yMin: 0, labels: i => hourLab(i), xTicks: i => i % 3 === 0 ? hourLab(i) : null, aria: 'Spikes by hour of day',
+    series: [{ key: 'all', type: 'bar', color: 'var(--base)' }, { key: 'still', type: 'bar', color: 'var(--hr)' }],
+    tip: i => `${hourLab(i)}<br><b>Spikes</b> ${spikeHours[i].all}<br><b>While still</b> ${spikeHours[i].still}`,
+  });
+  const recentSp = allSpikes.slice(-40).reverse();
+  $('#spikeTbl').innerHTML = `<thead><tr><th>When</th><th class="num">From → peak</th><th class="num">Rise</th><th class="num">Min</th><th class="num">Steps</th></tr></thead><tbody>${recentSp.map(e => `<tr><td>${fmtDate(e.date)} ${clock(e.start)}</td><td class="num">${fmt(e.base)} → ${fmt(e.peak)}</td><td class="num">+${fmt(e.peak - e.base)}</td><td class="num">${e.dur}</td><td class="num">${e.steps == null ? '–' : fmt(e.steps)}${e.still ? ' · still' : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No spikes found. Spikes need heart rate readings every few minutes.</td></tr>'}</tbody>`;
+  renderDayDetail();
   const hours = Array.from({ length: 24 }, (_, h) => ({ h, hr: mean(rows.map(r => r.hHR?.[h])), steps: mean(rows.map(r => r.hSteps?.[h])) }));
-  const hourLab = h => h === 0 ? '12a' : h < 12 ? h + 'a' : h === 12 ? '12p' : (h - 12) + 'p';
   drawChart($('#cHourHR'), {
     rows: hours, height: 190, labels: i => hourLab(i), xTicks: (i) => i % 3 === 0 ? hourLab(i) : null, aria: 'Average heart rate by hour',
     series: [{ key: 'hr', type: 'line', color: 'var(--hr)' }],
@@ -961,9 +1107,9 @@ function render() {
   for (const r of rows) { const wk = addDays(r.date, -((WEEKDAY(r.date) + 6) % 7)); if (!weeks.has(wk)) weeks.set(wk, []); weeks.get(wk).push(r); }
   const wkRows = [...weeks.entries()].reverse().map(([wk, rs]) => {
     const bad = rs.filter(r => r.status === 'strain' || r.status === 'crash').length;
-    return `<tr><td>${fmtDateY(wk)}</td><td class="num">${fmt(mean(rs.map(r => r.steps)))}</td><td class="num">${fmt(mean(rs.map(r => r.rhr)), 1)}</td><td class="num">${fmt(mean(rs.map(r => r.hrv)))}</td><td class="num">${fmt(mean(rs.map(r => r.hrAvg)))}</td><td class="num">${fmt(mean(rs.map(r => r.atMin)))}</td><td class="num">${fmt(rs.reduce((s, r) => s + (r.pots || 0), 0))}</td><td class="num">${fmt(mean(rs.map(r => r.sleep)), 1)}</td><td class="num">${bad}</td></tr>`;
+    return `<tr><td>${fmtDateY(wk)}</td><td class="num">${fmt(mean(rs.map(r => r.steps)))}</td><td class="num">${fmt(mean(rs.map(r => r.rhr)), 1)}</td><td class="num">${fmt(mean(rs.map(r => r.hrv)))}</td><td class="num">${fmt(mean(rs.map(r => r.hrAvg)))}</td><td class="num">${fmt(mean(rs.map(r => r.atMin)))}</td><td class="num">${fmt(rs.reduce((s, r) => s + (r.spikesStill || 0), 0))}</td><td class="num">${fmt(mean(rs.map(r => r.tachy100)))}</td><td class="num">${fmt(mean(rs.map(r => r.sleep)), 1)}</td><td class="num">${bad}</td></tr>`;
   }).join('');
-  $('#weekTbl').innerHTML = `<thead><tr><th>Week of</th><th class="num">Steps/day</th><th class="num">Resting HR</th><th class="num">HRV</th><th class="num">Avg HR</th><th class="num">Min &gt; AT/day</th><th class="num">High-HR still hrs</th><th class="num">Sleep h</th><th class="num">Strained days</th></tr></thead><tbody>${wkRows}</tbody>`;
+  $('#weekTbl').innerHTML = `<thead><tr><th>Week of</th><th class="num">Steps/day</th><th class="num">Resting HR</th><th class="num">HRV</th><th class="num">Avg HR</th><th class="num">Min &gt; AT/day</th><th class="num">Still spikes</th><th class="num">Min 100+/day</th><th class="num">Sleep h</th><th class="num">Strained days</th></tr></thead><tbody>${wkRows}</tbody>`;
   $('#dayTbl').innerHTML = `<thead><tr><th>Date</th><th class="num">Steps</th><th class="num">RHR</th><th class="num">HRV</th><th class="num">HR low/avg/high</th><th class="num">Min &gt; AT</th><th class="num">Sleep</th><th>Status</th></tr></thead><tbody>${rows.slice().reverse().map(r => `<tr><td>${fmtDateY(r.date)}</td><td class="num">${fmt(r.steps)}</td><td class="num">${fmt(r.rhr)}</td><td class="num">${fmt(r.hrv)}</td><td class="num">${r.hrAvg == null ? '–' : `${fmt(r.hrMin)}/${fmt(r.hrAvg)}/${fmt(r.hrMax)}`}</td><td class="num">${fmt(r.atMin)}</td><td class="num">${fmt(r.sleep, 1)}</td><td>${r.status ? STATUS[r.status].label : '–'}</td></tr>`).join('')}</tbody>`;
 
   renderRecovery();
@@ -1040,7 +1186,7 @@ function renderDataCheck() {
   if (!inp.value || inp.value < inp.min || inp.value > inp.max) inp.value = inp.max;
   const r = days.find(x => x.date === inp.value);
   $('#inspectOut').innerHTML = !r ? 'No data that day.' :
-    `Steps <b class="mono">${fmt(r.steps)}</b> · Resting HR <b class="mono">${fmt(r.rhr)}</b>${r.rhrEst ? ' (estimated, no Apple value)' : ''} · HR low/avg/high <b class="mono">${r.hrAvg == null ? '–' : `${fmt(r.hrMin)}/${fmt(r.hrAvg)}/${fmt(r.hrMax)}`}</b> · Minutes with HR <b class="mono">${fmt(r.hrCover)}</b> · HRV <b class="mono">${fmt(r.hrv)}</b>`;
+    `Steps <b class="mono">${fmt(r.steps)}</b> · Resting HR calculated <b class="mono">${fmt(r.rhrCalc)}</b> / Apple <b class="mono">${fmt(r.rhrApple)}</b> · HR low/avg/high <b class="mono">${r.hrAvg == null ? '–' : `${fmt(r.hrMin)}/${fmt(r.hrAvg)}/${fmt(r.hrMax)}`}</b> · Readings <b class="mono">${fmt(r.hrReadings)}</b> over <b class="mono">${fmt(r.hrCover)}</b> minutes · HRV <b class="mono">${fmt(r.hrv)}</b>`;
 }
 
 function renderRecovery() {
@@ -1092,8 +1238,11 @@ function renderInsights(rows, ctx) {
   // strained trend
   if (strained !== strainedP) add(strained < strainedP ? STATUS.ok.color : STATUS.watch.color, strained < strainedP ? '↓' : '↑', `<b>${strained} strained days in the last 30</b>, ${strained < strainedP ? 'down' : 'up'} from ${strainedP} in the 30 days before.`);
   // POTS
-  const potsDays = rows.filter(r => r.pots > 0).length, withHR = rows.filter(r => r.pots != null).length;
-  if (withHR && potsDays / withHR >= 0.25) add(STATUS.watch.color, '♥', `<b>High heart rate while still on ${potsDays} of ${withHR} days.</b> This pattern can point to orthostatic intolerance. A 10-minute stand test (NASA lean test) at home gives your clinician useful numbers.`);
+  const spDays = rows.filter(r => r.spikesStill != null);
+  const stillSp = spDays.reduce((s, r) => s + r.spikesStill, 0);
+  if (spDays.length && stillSp / spDays.length >= 0.5) add(STATUS.watch.color, '♥', `<b>${fmt(stillSp / spDays.length, 1)} heart rate spikes per day while still</b> (30+ bpm rises without walking). This pattern fits orthostatic intolerance or POTS. A 10-minute stand test (NASA lean test) gives your clinician useful numbers.`);
+  const stillDays = rows.filter(r => r.stillHigh != null), stillAvg = mean(stillDays.map(r => r.stillHigh));
+  if (stillAvg != null && stillAvg >= 15) add(STATUS.watch.color, '♥', `<b>${fmt(stillAvg)} minutes a day with HR 30+ bpm above resting while not walking.</b> Sitting or lying down, compression and fluids with salt are common first steps to discuss with a clinician.`);
   // RHR trend over range
   const half = Math.floor(rows.length / 2);
   if (rows.length >= 28) {
@@ -1147,9 +1296,10 @@ $('#range').addEventListener('click', e => {
   $('#range').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); render();
 });
 $('#inspectDay').addEventListener('change', renderDataCheck);
+$('#detailDay').addEventListener('change', renderDayDetail);
 $('#onset').addEventListener('change', e => { state.onset = e.target.value; store.set('lc_onset', state.onset); render(); });
 $('#copyCsv').addEventListener('click', async () => {
-  const cols = ['date', 'steps', 'rhr', 'rhrBase', 'hrv', 'hrvBase', 'hrMin', 'hrAvg', 'hrMax', 'at', 'atMin', 'pots', 'walkHR', 'hrr', 'spo2', 'resp', 'vo2', 'sleep', 'walkSpeed', 'dist', 'flights', 'exer', 'status', 'exertion'];
+  const cols = ['date', 'steps', 'rhr', 'rhrBase', 'hrv', 'hrvBase', 'hrMin', 'hrAvg', 'hrMax', 'rhrApple', 'nightHR', 'at', 'atMin', 'tachy100', 'tachy120', 'stillHigh', 'spikes', 'spikesStill', 'walkHR', 'hrr', 'spo2', 'resp', 'vo2', 'sleep', 'walkSpeed', 'dist', 'flights', 'exer', 'status', 'exertion'];
   const csv = [cols.join(','), ...rangeRows().map(r => cols.map(c => r[c] == null ? '' : typeof r[c] === 'number' ? round(r[c], 2) : r[c]).join(','))].join('\n');
   const btn = $('#copyCsv');
   try { await navigator.clipboard.writeText(csv); btn.textContent = 'Copied'; }
