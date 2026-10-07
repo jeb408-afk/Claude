@@ -178,6 +178,18 @@ details[open] > summary { margin-bottom: 10px; }
     <span class="small muted" id="rangeLabel"></span>
   </div>
 
+  <section class="panel" id="checkPanel">
+    <div class="panel-head">
+      <h2>Data check</h2>
+      <p class="small muted">What the page found in your export. Pick a day and compare these numbers with the same day in the Health app.</p>
+    </div>
+    <div class="tbl-wrap"><table id="typesTbl"></table></div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center">
+      <label class="ctl" for="inspectDay">Day <input type="date" id="inspectDay"></label>
+      <span class="small muted" id="inspectOut"></span>
+    </div>
+  </section>
+
   <section class="kpis" id="kpis" aria-label="Last 30 days summary"></section>
 
   <section class="panel">
@@ -373,7 +385,7 @@ function quantile(a, q) { a = nn(a).sort((x, y) => x - y); if (!a.length) return
 const median = a => quantile(a, .5);
 const round = (v, d = 0) => v == null ? null : Math.round(v * 10 ** d) / 10 ** d;
 const fmt = (v, d = 0) => v == null ? '–' : round(v, d).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
-const sign = (v, d = 0) => v == null ? '–' : (v > 0 ? '+' : v < 0 ? '−' : '±') + fmt(Math.abs(v), d);
+const sign = (v, d = 0) => { if (v == null) return '–'; const r = round(v, d); return (r > 0 ? '+' : r < 0 ? '−' : '±') + fmt(Math.abs(r), d); };
 
 // ---------- raw store ----------
 function rawDay() { return { steps: {}, hr: null, mean: {}, sum: {}, sleep: {} }; }
@@ -396,6 +408,9 @@ function makeLineHandler(raw, meta) {
     if (!isSteps && !isHR && !isSleep && !q) return;
     const start = attr(line, 'startDate'); if (!start) return;
     const d = start.slice(0, 10);
+    const srcName = attr(line, 'sourceName') || '?';
+    const T = meta.types[type] || (meta.types[type] = { n: 0, src: {}, first: d, last: d });
+    T.n++; T.src[srcName] = (T.src[srcName] || 0) + 1; if (d < T.first) T.first = d; if (d > T.last) T.last = d;
     const valS = attr(line, 'value');
     if (isSleep) {
       if (!valS || valS.indexOf('Asleep') < 0) return;
@@ -412,10 +427,11 @@ function makeLineHandler(raw, meta) {
       let a = r.steps[src]; if (!a) a = r.steps[src] = new Float64Array(24);
       a[+start.slice(11, 13)] += v;
     } else if (isHR) {
-      if (!r.hr) r.hr = new Uint8Array(1440);
+      if (v < 25 || v > 250) return;
+      if (!r.hrS) { r.hrS = new Float32Array(1440); r.hrN = new Uint16Array(1440); r.hrLo = 999; r.hrHi = 0; }
       const m = +start.slice(11, 13) * 60 + +start.slice(14, 16);
-      const hv = Math.min(255, Math.round(v));
-      if (hv > r.hr[m]) r.hr[m] = hv;
+      r.hrS[m] += v; r.hrN[m]++;
+      if (v < r.hrLo) r.hrLo = v; if (v > r.hrHi) r.hrHi = v;
     } else {
       const [key, kind] = q; const unit = attr(line, 'unit') || '';
       if (key === 'spo2' && v <= 1) v *= 100;
@@ -490,7 +506,7 @@ async function findZipEntry(file, test) {
 }
 
 async function parseFile(file, onProgress) {
-  const raw = new Map(), meta = { count: 0, imperial: false };
+  const raw = new Map(), meta = { count: 0, imperial: false, types: {} };
   const onLine = makeLineHandler(raw, meta);
   let bytes;
   if (/\.zip$/i.test(file.name) || file.type.includes('zip')) {
@@ -522,12 +538,24 @@ function derive(raw, meta) {
         o.hSteps = Array.from({ length: 24 }, (_, h) => Math.max(...srcs.map(a => a[h])));
         o.steps = o.hSteps.reduce((s, v) => s + v, 0);
       }
+      if (!r.hr && r.hrS) { r.hr = new Uint8Array(1440); for (let m = 0; m < 1440; m++) if (r.hrN[m]) r.hr[m] = Math.round(r.hrS[m] / r.hrN[m]); }
       if (r.hr) {
         let mn = 999, mx = 0, s = 0, n = 0; const hs = new Array(24).fill(0), hn = new Array(24).fill(0);
         for (let m = 0; m < 1440; m++) { const v = r.hr[m]; if (!v) continue; if (v < mn) mn = v; if (v > mx) mx = v; s += v; n++; hs[m / 60 | 0] += v; hn[m / 60 | 0]++; }
-        if (n) { o.hrMin = mn; o.hrMax = mx; o.hrAvg = s / n; o.hHR = hs.map((v, i) => hn[i] ? v / hn[i] : null); o.hN = hn; o.hrMinutes = r.hr; }
+        if (n) { o.hrMin = mn; o.hrMax = mx; o.hrAvg = s / n; o.hHR = hs.map((v, i) => hn[i] ? v / hn[i] : null); o.hN = hn; o.hrMinutes = r.hr; o.hrCover = n;
+          if (r.hrS) { o.hrMin = r.hrLo; o.hrMax = r.hrHi; }
+        }
       }
       for (const k in r.mean) o[k] = r.mean[k][0] / r.mean[k][1];
+      if (o.rhr == null && o.hrMinutes) {
+        // No Apple resting HR that day: use the lowest 30-minute average of minute HR
+        let best = null;
+        for (let m0 = 0; m0 + 30 <= 1440; m0 += 5) {
+          let s = 0, n = 0; for (let m = m0; m < m0 + 30; m++) { const v = o.hrMinutes[m]; if (v) { s += v; n++; } }
+          if (n >= 6 && (best == null || s / n < best)) best = s / n;
+        }
+        if (best != null) { o.rhr = best; o.rhrEst = true; }
+      }
       for (const k in r.sum) o[k] = Math.max(...Object.values(r.sum[k]));
       const sl = Object.values(r.sleep); if (sl.length) o.sleep = Math.min(16, Math.max(...sl) / 3600000);
     }
@@ -840,7 +868,7 @@ function render() {
   drawChart($('#cRHR'), {
     rows, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Resting heart rate',
     series: [{ key: 'rhrBase', type: 'line', color: 'var(--base)', dash: '5 4', width: 1.5 }, { key: 'rhr', type: 'line', color: 'var(--hr)' }],
-    tip: i => { const r = rows[i]; if (r.rhr == null) return null; return `${fmtDateY(r.date)}<br><b>Resting HR</b> ${fmt(r.rhr)} bpm<br><b>Baseline</b> ${fmt(r.rhrBase)} (${sign(r.rhrDelta, 1)})`; },
+    tip: i => { const r = rows[i]; if (r.rhr == null) return null; return `${fmtDateY(r.date)}<br><b>Resting HR</b> ${fmt(r.rhr)} bpm${r.rhrEst ? ' (estimated)' : ''}<br><b>Baseline</b> ${fmt(r.rhrBase)} (${sign(r.rhrDelta, 1)})`; },
   });
   drawChart($('#cHRV'), {
     rows, labels: i => fmtDate(rows[i].date), xTicks: dateTicks(rows), aria: 'Heart rate variability',
@@ -939,6 +967,7 @@ function render() {
   $('#dayTbl').innerHTML = `<thead><tr><th>Date</th><th class="num">Steps</th><th class="num">RHR</th><th class="num">HRV</th><th class="num">HR low/avg/high</th><th class="num">Min &gt; AT</th><th class="num">Sleep</th><th>Status</th></tr></thead><tbody>${rows.slice().reverse().map(r => `<tr><td>${fmtDateY(r.date)}</td><td class="num">${fmt(r.steps)}</td><td class="num">${fmt(r.rhr)}</td><td class="num">${fmt(r.hrv)}</td><td class="num">${r.hrAvg == null ? '–' : `${fmt(r.hrMin)}/${fmt(r.hrAvg)}/${fmt(r.hrMax)}`}</td><td class="num">${fmt(r.atMin)}</td><td class="num">${fmt(r.sleep, 1)}</td><td>${r.status ? STATUS[r.status].label : '–'}</td></tr>`).join('')}</tbody>`;
 
   renderRecovery();
+  renderDataCheck();
   renderInsights(rows, { envelope, events, evRows, hours, strained, strainedP, L, P });
 }
 
@@ -981,6 +1010,37 @@ function drawCalendar(rows) {
     c.addEventListener('pointerleave', () => tip.hidden = true); c.addEventListener('blur', () => tip.hidden = true);
   });
   host.scrollLeft = host.scrollWidth;
+}
+
+const TYPE_LABEL = {
+  HKQuantityTypeIdentifierStepCount: 'Steps', HKQuantityTypeIdentifierHeartRate: 'Heart rate',
+  HKQuantityTypeIdentifierRestingHeartRate: 'Resting heart rate', HKQuantityTypeIdentifierHeartRateVariabilitySDNN: 'HRV',
+  HKQuantityTypeIdentifierWalkingHeartRateAverage: 'Walking HR average', HKQuantityTypeIdentifierHeartRateRecoveryOneMinute: 'HR recovery',
+  HKQuantityTypeIdentifierOxygenSaturation: 'Blood oxygen', HKQuantityTypeIdentifierRespiratoryRate: 'Respiratory rate',
+  HKQuantityTypeIdentifierVO2Max: 'VO2 max', HKQuantityTypeIdentifierWalkingSpeed: 'Walking speed',
+  HKQuantityTypeIdentifierDistanceWalkingRunning: 'Distance', HKQuantityTypeIdentifierFlightsClimbed: 'Flights climbed',
+  HKQuantityTypeIdentifierAppleExerciseTime: 'Exercise minutes', HKCategoryTypeIdentifierSleepAnalysis: 'Sleep',
+};
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function renderDataCheck() {
+  const types = state.meta.types;
+  if (state.sample || !types) { $('#typesTbl').innerHTML = '<tbody><tr><td class="muted">Load your export to see which records and sources were found.</td></tr></tbody>'; }
+  else {
+    const hrKeys = ['HKQuantityTypeIdentifierHeartRate', 'HKQuantityTypeIdentifierRestingHeartRate', 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN', 'HKQuantityTypeIdentifierStepCount'];
+    const keys = [...hrKeys, ...Object.keys(TYPE_LABEL).filter(k => !hrKeys.includes(k))];
+    $('#typesTbl').innerHTML = `<thead><tr><th>Record type</th><th class="num">Records</th><th>From</th><th>To</th><th>Sources</th></tr></thead><tbody>${keys.map(k => {
+      const t = types[k];
+      if (!t) return `<tr><td>${TYPE_LABEL[k]}</td><td class="num">0</td><td>–</td><td>–</td><td class="muted">${hrKeys.includes(k) ? 'None found' : '–'}</td></tr>`;
+      const src = Object.entries(t.src).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${esc(n)} (${fmt(c)})`).join(', ');
+      return `<tr><td>${TYPE_LABEL[k]}</td><td class="num">${fmt(t.n)}</td><td>${fmtDateY(t.first)}</td><td>${fmtDateY(t.last)}</td><td style="white-space:normal;min-width:240px">${src}</td></tr>`;
+    }).join('')}</tbody>`;
+  }
+  const inp = $('#inspectDay'), days = state.days; if (!days.length) return;
+  inp.min = days[0].date; inp.max = days[days.length - 1].date;
+  if (!inp.value || inp.value < inp.min || inp.value > inp.max) inp.value = inp.max;
+  const r = days.find(x => x.date === inp.value);
+  $('#inspectOut').innerHTML = !r ? 'No data that day.' :
+    `Steps <b class="mono">${fmt(r.steps)}</b> · Resting HR <b class="mono">${fmt(r.rhr)}</b>${r.rhrEst ? ' (estimated, no Apple value)' : ''} · HR low/avg/high <b class="mono">${r.hrAvg == null ? '–' : `${fmt(r.hrMin)}/${fmt(r.hrAvg)}/${fmt(r.hrMax)}`}</b> · Minutes with HR <b class="mono">${fmt(r.hrCover)}</b> · HRV <b class="mono">${fmt(r.hrv)}</b>`;
 }
 
 function renderRecovery() {
@@ -1086,6 +1146,7 @@ $('#range').addEventListener('click', e => {
   state.range = +b.dataset.r; store.set('lc_range', b.dataset.r);
   $('#range').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); render();
 });
+$('#inspectDay').addEventListener('change', renderDataCheck);
 $('#onset').addEventListener('change', e => { state.onset = e.target.value; store.set('lc_onset', state.onset); render(); });
 $('#copyCsv').addEventListener('click', async () => {
   const cols = ['date', 'steps', 'rhr', 'rhrBase', 'hrv', 'hrvBase', 'hrMin', 'hrAvg', 'hrMax', 'at', 'atMin', 'pots', 'walkHR', 'hrr', 'spo2', 'resp', 'vo2', 'sleep', 'walkSpeed', 'dist', 'flights', 'exer', 'status', 'exertion'];
