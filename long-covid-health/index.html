@@ -174,6 +174,7 @@ details[open] > summary { margin-bottom: 10px; }
         <button type="button" data-r="0">All</button>
       </div>
     </div>
+    <label class="ctl" for="exSleep"><input type="checkbox" id="exSleep"> Leave out sleep</label>
     <label class="ctl" for="onset">COVID onset <input type="date" id="onset"></label>
     <span class="small muted" id="rangeLabel"></span>
   </div>
@@ -251,7 +252,7 @@ details[open] > summary { margin-bottom: 10px; }
   <section class="panel">
     <div class="panel-head">
       <h2>Resting heart rate and HRV</h2>
-      <p class="small muted">The two most sensitive early-warning signals for overexertion. A rising RHR or falling HRV for 2+ days is a cue to rest. Resting HR is calculated from your raw heart rate: the 25th percentile of awake minutes (6am to 11pm) with no steps in the surrounding minutes. Apple's own value is used only on days without enough readings. HRV comes from Apple, since it needs beat-to-beat data.</p>
+      <p class="small muted">The two most sensitive early-warning signals for overexertion. A rising RHR or falling HRV for 2+ days is a cue to rest. Resting HR is calculated from your raw heart rate: the 25th percentile of awake minutes with no steps in the surrounding minutes. Overnight is your average while asleep. Apple's own value is used only on days without enough readings. HRV comes from Apple, since it needs beat-to-beat data.</p>
     </div>
     <div class="grid2">
       <div style="display:grid;gap:8px;min-width:0">
@@ -340,7 +341,7 @@ details[open] > summary { margin-bottom: 10px; }
     </div>
     <p class="small muted" id="detailNote"></p>
     <div class="chart-title"><h3>Heart rate, bpm (5-minute average)</h3>
-      <div class="legend"><span><i style="background:var(--hr)"></i>Heart rate</span><span><i class="dash"></i>Threshold</span></div>
+      <div class="legend"><span><i style="background:var(--hr)"></i>Awake</span><span><i style="background:var(--sleep)"></i>Asleep</span><span><i class="dash"></i>Threshold</span></div>
     </div>
     <div class="chart" id="cDayHR"></div>
     <div class="chart-title"><h3>Steps per 5 minutes</h3></div>
@@ -376,6 +377,7 @@ details[open] > summary { margin-bottom: 10px; }
   </section>
 
   <footer class="foot">
+    <p>With "Leave out sleep" on, heart rate while asleep is removed from daily HR, threshold minutes, tachycardia, spikes and resting HR. Sleep comes from Health sleep records (asleep or in bed); on nights without them it is estimated from the longest quiet stretch with low heart rate.</p>
     <p><b>Not medical advice.</b> These are pattern-finding tools based on published pacing approaches (Workwell Foundation heart-rate pacing, Bateman Horne Center guidance). Thresholds are estimates; your clinician can set personal limits, especially if you take beta blockers or ivabradine, which lower heart rate.</p>
     <p>Steps from iPhone and Apple Watch are de-duplicated by taking the higher source each hour. Heart rate is reduced to one value per minute so workouts do not outweigh background readings.</p>
   </footer>
@@ -458,9 +460,19 @@ function makeLineHandler(raw, meta) {
     T.n++; T.src[srcName] = (T.src[srcName] || 0) + 1; if (d < T.first) T.first = d; if (d > T.last) T.last = d;
     const valS = attr(line, 'value');
     if (isSleep) {
-      if (!valS || valS.indexOf('Asleep') < 0) return;
+      if (!valS) return;
+      const asleep = valS.indexOf('Asleep') >= 0, inBed = valS.indexOf('InBed') >= 0;
+      if (!asleep && !inBed) return;
       const end = attr(line, 'endDate'); const ed = end.slice(0, 10);
-      const dur = tsMs(end) - tsMs(start); if (!(dur > 0)) return;
+      const dur = tsMs(end) - tsMs(start); if (!(dur > 0) || dur > 20 * 3600000) return;
+      const m0 = +start.slice(11, 13) * 60 + +start.slice(14, 16), dm = Math.round(dur / 60000);
+      let md = d, mr = null;
+      for (let k = 0; k < dm; k++) {
+        const t = m0 + k, off = Math.floor(t / 1440), dd = off ? addDays(d, off) : d;
+        if (dd !== md || !mr) { md = dd; const rr = getDay(raw, dd); mr = rr.sleepMask || (rr.sleepMask = new Uint8Array(1440)); }
+        mr[t % 1440] = 1;
+      }
+      if (!asleep) return;
       const src = attr(line, 'sourceName') || '?';
       const r = getDay(raw, ed); r.sleep[src] = (r.sleep[src] || 0) + dur; meta.count++;
       return;
@@ -589,11 +601,20 @@ function derive(raw, meta) {
         o.steps = o.hSteps.reduce((s, v) => s + v, 0);
       }
       if (!r.hr && r.hrS) { r.hr = new Uint8Array(1440); for (let m = 0; m < 1440; m++) if (r.hrN[m]) r.hr[m] = Math.round(r.hrS[m] / r.hrN[m]); }
+      // sleep: Health sleep records when present, otherwise inferred from long quiet stretches
+      let mask = null;
+      if (r.sleepMask && r.sleepMask.some(v => v)) { mask = r.sleepMask; o.sleepSrc = 'health'; }
+      else if (o.mSteps) { mask = inferSleep(o.mSteps, r.hr); if (mask) o.sleepSrc = 'estimated'; }
+      o.sleepMask = mask; o.sleepMin = mask ? mask.reduce((a, v) => a + v, 0) : 0;
       if (r.hr) {
+        o.hrAll = r.hr;
+        let hm = r.hr;
+        if (state.excludeSleep && mask) { hm = r.hr.slice(); for (let m = 0; m < 1440; m++) if (mask[m]) hm[m] = 0; }
         let mn = 999, mx = 0, s = 0, n = 0; const hs = new Array(24).fill(0), hn = new Array(24).fill(0);
-        for (let m = 0; m < 1440; m++) { const v = r.hr[m]; if (!v) continue; if (v < mn) mn = v; if (v > mx) mx = v; s += v; n++; hs[m / 60 | 0] += v; hn[m / 60 | 0]++; }
-        if (n) { o.hrMin = mn; o.hrMax = mx; o.hrAvg = s / n; o.hHR = hs.map((v, i) => hn[i] ? v / hn[i] : null); o.hN = hn; o.hrMinutes = r.hr; o.hrCover = n;
-          if (r.hrS) { o.hrMin = r.hrLo; o.hrMax = r.hrHi; let t = 0; for (let m = 0; m < 1440; m++) t += r.hrN[m]; o.hrReadings = t; }
+        for (let m = 0; m < 1440; m++) { const v = hm[m]; if (!v) continue; if (v < mn) mn = v; if (v > mx) mx = v; s += v; n++; hs[m / 60 | 0] += v; hn[m / 60 | 0]++; }
+        if (r.hrS) { let t = 0; for (let m = 0; m < 1440; m++) t += r.hrN[m]; o.hrReadings = t; }
+        if (n) { o.hrMin = mn; o.hrMax = mx; o.hrAvg = s / n; o.hHR = hs.map((v, i) => hn[i] ? v / hn[i] : null); o.hN = hn; o.hrMinutes = hm; o.hrCover = n;
+          if (r.hrS && !(state.excludeSleep && mask)) { o.hrMin = r.hrLo; o.hrMax = r.hrHi; }
         }
       }
       for (const k in r.mean) o[k] = r.mean[k][0] / r.mean[k][1];
@@ -604,11 +625,13 @@ function derive(raw, meta) {
           o.still = new Uint8Array(1440);
           for (let m = 0; m < 1440; m++) { let t = 0; for (let k = Math.max(0, m - 5); k <= Math.min(1439, m + 2); k++) t += ms[k]; o.still[m] = t < 1 ? 1 : 0; }
         }
-        // Calculated resting HR: 25th percentile of awake (6am-11pm) minutes with no steps nearby
-        const restV = [];
-        for (let m = 360; m < 1380; m++) if (hm[m] && (!o.still || o.still[m])) restV.push(hm[m]);
+        // Calculated resting HR: 25th percentile of awake minutes with no steps nearby
+        const restV = [], awake = m => o.sleepMask ? !o.sleepMask[m] : (m >= 360 && m < 1380);
+        for (let m = 0; m < 1440; m++) if (hm[m] && awake(m) && (!o.still || o.still[m])) restV.push(hm[m]);
         o.rhrCalc = restV.length >= 60 ? quantile(restV, 0.25) : null;
-        const night = []; for (let m = 0; m < 360; m++) if (hm[m]) night.push(hm[m]);
+        const night = [];
+        if (o.sleepMask && o.sleepMin >= 60) { for (let m = 0; m < 1440; m++) if (o.sleepMask[m] && o.hrAll[m]) night.push(o.hrAll[m]); }
+        else for (let m = 0; m < 360; m++) if (o.hrAll[m]) night.push(o.hrAll[m]);
         o.nightHR = night.length >= 30 ? mean(night) : null;
         if (o.rhrCalc != null) { o.rhr = o.rhrCalc; o.rhrSrc = 'calc'; }
         else if (o.rhrApple != null) o.rhrSrc = 'apple';
@@ -662,6 +685,36 @@ function derive(raw, meta) {
   return days;
 }
 
+// Estimate sleep when Health has no sleep records: the longest quiet stretch (almost no steps,
+// HR below the day's median) touching the early morning, plus a quiet stretch running into midnight.
+function inferSleep(ms, hr) {
+  const quiet = new Uint8Array(1440);
+  for (let m = 0; m < 1440; m++) { let t = 0; for (let k = Math.max(0, m - 5); k <= Math.min(1439, m + 5); k++) t += ms[k]; quiet[m] = t < 15 ? 1 : 0; }
+  const runs = []; let st = -1, gap = 0;
+  for (let m = 0; m <= 1440; m++) {
+    const q = m < 1440 && quiet[m];
+    if (q) { if (st < 0) st = m; gap = 0; }
+    else if (st >= 0 && (++gap > 10 || m === 1440)) { runs.push([st, m - gap + 1]); st = -1; gap = 0; }
+  }
+  let med = null;
+  if (hr) { const v = []; for (let m = 0; m < 1440; m++) if (hr[m]) v.push(hr[m]); if (v.length > 30) med = median(v); }
+  const calm = ([a, b]) => { if (med == null) return true; let s = 0, n = 0; for (let m = a; m < b; m++) if (hr[m]) { s += hr[m]; n++; } return !n || s / n < med; };
+  const mask = new Uint8Array(1440); let any = false;
+  const morning = runs.filter(([a, b]) => a < 360 && b - a >= 120 && b <= 780 && calm([a, b])).sort((x, y) => (y[1] - y[0]) - (x[1] - x[0]))[0];
+  const evening = runs.filter(([a, b]) => a >= 1200 && b >= 1430 && b - a >= 30 && calm([a, b]))[0];
+  // trim quiet-but-awake edges: drop ends where HR sits well above the stretch's low level
+  const trim = r => {
+    if (!r || med == null) return r;
+    let [a, b] = r; const v = []; for (let m = a; m < b; m++) if (hr[m]) v.push(hr[m]); if (v.length < 20) return r;
+    const lim = quantile(v, 0.2) + 8, avg = (x, y) => { let s = 0, n = 0; for (let m = x; m < y; m++) if (hr[m]) { s += hr[m]; n++; } return n ? s / n : 0; };
+    while (b - a > 30 && avg(b - 15, b) > lim) b -= 5;
+    while (b - a > 30 && avg(a, a + 15) > lim) a += 5;
+    return [a, b];
+  };
+  for (const r of [trim(morning), trim(evening)]) if (r) { for (let m = r[0]; m < r[1]; m++) mask[m] = 1; any = true; }
+  return any ? mask : null;
+}
+
 // Sudden rises: minute HR 30+ bpm above the average of the 6-15 minutes before.
 // Needs readings at least every ~3 minutes, so sparse background data yields none.
 function findSpikes(hm, ms) {
@@ -713,6 +766,7 @@ function makeSample() {
       const bout = 12 + (R() * 15 | 0), b0 = h * 60 + (R() * (60 - bout) | 0);
       for (let k = 0; k < bout; k++) a[b0 + k] = hs / bout;
     }
+    r.sleepMask = new Uint8Array(1440); for (let m = 0; m < 1440; m++) if (m < 360 || m >= 1380) r.sleepMask[m] = 1;
     r.hr = new Uint8Array(1440);
     const potsy = post ? (1 - recov) : 0.05;
     const spikeAt = new Set(); const nSp = Math.round(potsy * 4 * R() + R() * 0.6);
@@ -742,7 +796,7 @@ function makeSample() {
 }
 
 // ---------- app state ----------
-const state = { days: [], meta: {}, range: 90, onset: store.get('lc_onset') || '', sample: true };
+const state = { days: [], meta: {}, raw: null, excludeSleep: store.get('lc_exsleep') !== '0', range: 90, onset: store.get('lc_onset') || '', sample: true };
 
 // ---------- SVG chart helpers ----------
 const NS = 'http://www.w3.org/2000/svg';
@@ -862,22 +916,29 @@ function renderDayDetail() {
   const r = days.find(x => x.date === inp.value) || {};
   const bins = Array.from({ length: 288 }, (_, b) => {
     let s = 0, n = 0, st = 0;
-    for (let m = b * 5; m < b * 5 + 5; m++) { const v = r.hrMinutes?.[m]; if (v) { s += v; n++; } st += r.mSteps?.[m] || 0; }
-    return { b, hr: n ? s / n : null, steps: r.mSteps ? st : null };
+    let sl = 0;
+    for (let m = b * 5; m < b * 5 + 5; m++) { const v = r.hrAll?.[m]; if (v) { s += v; n++; } st += r.mSteps?.[m] || 0; sl += r.sleepMask?.[m] || 0; }
+    return { b, hr: n ? s / n : null, steps: r.mSteps ? st : null, asleep: sl >= 3 };
   });
   // bridge short gaps so sparse readings still draw a line
   let last = null, gap = 0; bins.forEach(x => { if (x.hr != null) { last = x.hr; gap = 0; } else if (last != null && ++gap <= 2) x.hrFill = last; });
-  bins.forEach(x => x.hrLine = x.hr ?? x.hrFill ?? null);
+  bins.forEach((x, i) => {
+    const v = x.hr ?? x.hrFill ?? null;
+    x.hrAwake = !x.asleep ? v : null; x.hrSleep = x.asleep ? v : null;
+    x.hrLine = v;
+  });
+  // join the two lines at each switch so there is no visual gap
+  bins.forEach((x, i) => { const p = bins[i - 1]; if (p && p.asleep !== x.asleep) { if (x.asleep) x.hrAwake = x.hrLine; else x.hrSleep = x.hrLine; } });
   const sp = r.spikeList || [];
   $('#detailNote').innerHTML = r.hrMinutes
-    ? `${fmtDateY(r.date)}: ${fmt(r.hrReadings ?? r.hrCover)} heart rate readings over ${fmt(r.hrCover)} minutes · resting ${fmt(r.rhr)} bpm · ${fmt(r.tachy100)} min at 100+ · ${sp.length} spike${sp.length === 1 ? '' : 's'}${sp.length ? ` (${sp.map(e => clock(e.start) + (e.still ? ' still' : '')).join(', ')})` : ''}`
+    ? `${fmtDateY(r.date)}: ${fmt(r.hrReadings ?? r.hrCover)} heart rate readings · ${r.sleepMin ? `${fmt(r.sleepMin / 60, 1)} h asleep (${r.sleepSrc === 'health' ? 'from Health' : 'estimated'})${state.excludeSleep ? ', left out of the numbers' : ''}` : 'no sleep found'} · resting ${fmt(r.rhr)} bpm · ${fmt(r.tachy100)} min at 100+ · ${sp.length} spike${sp.length === 1 ? '' : 's'}${sp.length ? ` (${sp.map(e => clock(e.start) + (e.still ? ' still' : '')).join(', ')})` : ''}`
     : 'No heart rate readings on this day.';
   const tickT = i => i % 36 === 0 ? hourLab(i / 12) : null;
   drawChart($('#cDayHR'), {
     rows: r.hrMinutes ? bins : [], height: 220, labels: i => clock(i * 5), xTicks: tickT, aria: 'Heart rate across the selected day',
-    series: [{ key: 'hrLine', type: 'line', color: 'var(--hr)', width: 1.5 }],
+    series: [{ key: 'hrSleep', type: 'line', color: 'var(--sleep)', width: 1.5 }, { key: 'hrAwake', type: 'line', color: 'var(--hr)', width: 1.5 }],
     refs: r.at ? [{ y: r.at, label: `threshold ${r.at}` }] : [],
-    tip: i => bins[i].hrLine == null ? null : `${clock(i * 5)}–${clock(i * 5 + 5)}<br><b>HR</b> ${fmt(bins[i].hrLine)} bpm<br><b>Steps</b> ${fmt(bins[i].steps)}`,
+    tip: i => bins[i].hrLine == null ? null : `${clock(i * 5)}–${clock(i * 5 + 5)}${bins[i].asleep ? ' · asleep' : ''}<br><b>HR</b> ${fmt(bins[i].hrLine)} bpm<br><b>Steps</b> ${fmt(bins[i].steps)}`,
   });
   drawChart($('#cDaySteps'), {
     rows: r.mSteps ? bins : [], height: 120, yMin: 0, labels: i => clock(i * 5), xTicks: tickT, aria: 'Steps across the selected day',
@@ -1186,7 +1247,7 @@ function renderDataCheck() {
   if (!inp.value || inp.value < inp.min || inp.value > inp.max) inp.value = inp.max;
   const r = days.find(x => x.date === inp.value);
   $('#inspectOut').innerHTML = !r ? 'No data that day.' :
-    `Steps <b class="mono">${fmt(r.steps)}</b> · Resting HR calculated <b class="mono">${fmt(r.rhrCalc)}</b> / Apple <b class="mono">${fmt(r.rhrApple)}</b> · HR low/avg/high <b class="mono">${r.hrAvg == null ? '–' : `${fmt(r.hrMin)}/${fmt(r.hrAvg)}/${fmt(r.hrMax)}`}</b> · Readings <b class="mono">${fmt(r.hrReadings)}</b> over <b class="mono">${fmt(r.hrCover)}</b> minutes · HRV <b class="mono">${fmt(r.hrv)}</b>`;
+    `Steps <b class="mono">${fmt(r.steps)}</b> · Resting HR calculated <b class="mono">${fmt(r.rhrCalc)}</b> / Apple <b class="mono">${fmt(r.rhrApple)}</b> · HR low/avg/high <b class="mono">${r.hrAvg == null ? '–' : `${fmt(r.hrMin)}/${fmt(r.hrAvg)}/${fmt(r.hrMax)}`}</b> · Readings <b class="mono">${fmt(r.hrReadings)}</b> · Awake minutes with HR <b class="mono">${fmt(r.hrCover)}</b> · Asleep <b class="mono">${fmt(r.sleepMin / 60, 1)} h</b> ${r.sleepMin ? (r.sleepSrc === 'health' ? '(Health)' : '(estimated)') : ''} · HRV <b class="mono">${fmt(r.hrv)}</b>`;
 }
 
 function renderRecovery() {
@@ -1261,7 +1322,7 @@ function renderInsights(rows, ctx) {
 
 // ---------- wiring ----------
 function setData(raw, meta, sample, onset) {
-  state.days = derive(raw, meta); state.meta = meta; state.sample = sample;
+  state.raw = raw; state.days = derive(raw, meta); state.meta = meta; state.sample = sample;
   if (onset && !store.get('lc_onset')) state.onset = onset;
   if (!sample && state.onset === state.sampleOnset) state.onset = store.get('lc_onset') || '';
   render();
@@ -1296,6 +1357,8 @@ $('#range').addEventListener('click', e => {
   $('#range').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); render();
 });
 $('#inspectDay').addEventListener('change', renderDataCheck);
+$('#exSleep').checked = state.excludeSleep;
+$('#exSleep').addEventListener('change', e => { state.excludeSleep = e.target.checked; store.set('lc_exsleep', e.target.checked ? '1' : '0'); if (state.raw) { state.days = derive(state.raw, state.meta); render(); } });
 $('#detailDay').addEventListener('change', renderDayDetail);
 $('#onset').addEventListener('change', e => { state.onset = e.target.value; store.set('lc_onset', state.onset); render(); });
 $('#copyCsv').addEventListener('click', async () => {
