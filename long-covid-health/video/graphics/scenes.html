@@ -1,0 +1,252 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Motion graphics</title>
+<style>
+@font-face { font-family: Anton; src: url(anton.woff2) format("woff2"); }
+:root {
+  --bg: #0a0c0f; --bg-2: #1a1f26;
+  --ink: #f5f5f2; --muted: #8d959e;
+  --red: #ff3b47; --green: #39d98a; --amber: #ffc23d;
+  --display: Anton, Impact, sans-serif;
+  --body: Inter, "Liberation Sans", sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: transparent; }
+#stage { position: absolute; inset: 0; color: var(--ink); font-family: var(--body); }
+#stage.bg { background: radial-gradient(ellipse 90% 60% at 50% 38%, var(--bg-2), var(--bg) 72%); }
+.abs { position: absolute; }
+.center { left: 0; right: 0; text-align: center; }
+.disp { font-family: var(--display); line-height: .92; letter-spacing: .01em; }
+.label { font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.src { font-weight: 500; font-size: 30px; color: var(--muted); letter-spacing: .02em; }
+.chip { display: inline-block; padding: 18px 34px; border-radius: 999px; border: 3px solid #3a424c; font: 700 46px var(--body); color: var(--ink); background: #151a20; margin: 12px; }
+</style>
+<div id="stage"></div>
+<script>
+// Each scene is a pure function of t (seconds) returning HTML, so any frame renders deterministically.
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, p) => a + (b - a) * p;
+const outCubic = p => 1 - Math.pow(1 - p, 3);
+const outExpo = p => p >= 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const inOut = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const outBack = p => { const c = 1.9; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); };
+const mix = (c1, c2, p) => { const h = c => [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16)); const a = h(c1), b = h(c2); return `rgb(${a.map((v, i) => Math.round(lerp(v, b[i], p))).join(',')})`; };
+const fade = (t, a, d = .35) => outCubic(seg(t, a, a + d));
+// Fade + rise in from below.
+const rise = (t, a, d = .45, dy = 40) => { const p = fade(t, a, d); return `opacity:${p};transform:translateY(${(1 - p) * dy}px)`; };
+const fmt = n => Math.round(n).toLocaleString('en-US');
+const shake = (t, a, d = .35, amp = 18) => { const p = seg(t, a, a + d); if (p <= 0 || p >= 1) return [0, 0]; const k = amp * (1 - p); return [Math.sin(t * 97) * k, Math.cos(t * 83) * k]; };
+
+const person = (fill, size) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24"><circle cx="12" cy="6" r="4.2" fill="${fill}"/><path d="M4 23v-5.5C4 13.4 7.6 11 12 11s8 2.4 8 6.5V23z" fill="${fill}"/></svg>`;
+
+const ECG = p => {
+  const g = (c, w, a) => a * Math.exp(-Math.pow((p - c) / w, 2));
+  return g(.16, .035, .12) + g(.28, .008, -.12) + g(.3, .01, 1) + g(.325, .01, -.32) + g(.55, .05, .24);
+};
+
+const S = {
+  // Cut 2: height ruler overlay, transparent background. Line the floor mark up with his feet.
+  s02_height: { dur: 3.0, alpha: true, render(t) {
+    const pxPerFt = 150, floor = 1520, total = 7.25;
+    const grow = outCubic(seg(t, .1, 1.3)), ft = total * grow;
+    const top = floor - ft * pxPerFt;
+    let ticks = '';
+    for (let i = 1; i <= 7; i++) {
+      const y = floor - i * pxPerFt, on = ft >= i;
+      ticks += `<div class="abs" style="left:96px;top:${y - 2}px;width:${on ? 64 : 0}px;height:5px;background:#fff;box-shadow:0 2px 8px #000a"></div>
+        <div class="abs label" style="left:172px;top:${y - 22}px;font-size:36px;opacity:${on ? 1 : 0};text-shadow:0 2px 10px #000">${i}'</div>`;
+    }
+    const inches = Math.round(ft * 12), lab = `${Math.floor(inches / 12)}'${inches % 12}"`;
+    const pop = outBack(seg(t, 1.25, 1.65));
+    return `
+      <div class="abs" style="left:96px;top:${top}px;width:16px;height:${floor - top}px;background:linear-gradient(var(--red),#ff3b4700);border-radius:8px;box-shadow:0 0 30px #ff3b4788"></div>
+      <div class="abs" style="left:96px;top:${floor - 2}px;width:120px;height:6px;background:#fff;opacity:${fade(t, 0, .2)}"></div>
+      ${ticks}
+      <div class="abs" style="left:96px;top:${top - 3}px;width:150px;height:7px;background:var(--red)"></div>
+      <div class="abs disp" style="left:96px;top:${top - 190}px;font-size:170px;color:#fff;text-shadow:0 6px 30px #000c;transform-origin:left bottom;transform:scale(${t < 1.25 ? .7 : lerp(.7, 1, pop)})">${lab}</div>`;
+  }},
+
+  // Cut 4: "POTS" slam with heartbeat pulses.
+  s04_pots: { dur: 3.5, render(t) {
+    const p = outBack(seg(t, 0, .45)), scale = lerp(2.6, 1, p);
+    const beat = t > .6 ? Math.max(0, Math.sin(((t - .6) % .75) / .75 * Math.PI * 2)) ** 6 : 0;
+    const ring = seg(t, .4, 1.3), ring2 = seg(t, 1.15, 2.05);
+    const ringEl = (r) => r > 0 && r < 1 ? `<div class="abs" style="left:540px;top:900px;width:${200 + r * 1100}px;height:${200 + r * 1100}px;margin:${-(100 + r * 550)}px 0 0 ${-(100 + r * 550)}px;border:${10 * (1 - r)}px solid var(--red);border-radius:50%;opacity:${1 - r}"></div>` : '';
+    return `${ringEl(ring)}${ringEl(ring2)}
+      <div class="abs center label" style="top:560px;font-size:46px;color:var(--muted);${rise(t, .7)}">Diagnosed · 2025</div>
+      <div class="abs center disp" style="top:700px;font-size:400px;color:var(--red);opacity:${clamp(p * 3)};transform:scale(${scale * (1 + beat * .05)});text-shadow:0 0 ${60 + beat * 80}px #ff3b4766">POTS</div>`;
+  }},
+
+  // Cut 5: acronym spelled out word by word.
+  s05_definition: { dur: 4.0, render(t) {
+    const words = ['Postural', 'Orthostatic', 'Tachycardia', 'Syndrome'];
+    const rows = words.map((w, i) => {
+      const p = outCubic(seg(t, .25 + i * .6, .75 + i * .6));
+      return `<div class="disp" style="font-size:150px;margin:18px 0;opacity:${p};transform:translateX(${(1 - p) * -80}px)"><span style="color:var(--red)">${w[0]}</span>${w.slice(1).toUpperCase()}</div>`;
+    }).join('');
+    return `<div class="abs disp" style="left:110px;top:330px;font-size:110px;color:var(--red);${rise(t, 0)}">POTS =</div>
+      <div class="abs" style="left:110px;top:520px">${rows}</div>`;
+  }},
+
+  // Cut 6: heart-rate counter 70 -> 130 with a sweeping ECG trace.
+  s06_heartrate: { dur: 4.5, render(t) {
+    const bpmAt = s => 70 + 60 * inOut(seg(s, .4, 3.0));
+    const bpm = bpmAt(t), heat = seg(bpm, 70, 130);
+    const speed = 1080 / 3.6, head = Math.min(1080, t * speed);
+    let phase = 0, pts = [];
+    for (let x = 0; x <= head; x += 3) {
+      const s = x / speed; phase += bpmAt(s) / 60 * (3 / speed);
+      pts.push(`${x},${1290 - ECG(phase % 1) * 230}`);
+    }
+    const col = mix('#f5f5f2', '#ff3b47', heat);
+    return `
+      <div class="abs center label" style="top:380px;font-size:46px;color:var(--muted);${rise(t, 0)}">Heart rate on standing</div>
+      <div class="abs center disp" style="top:470px;font-size:400px;color:${col};text-shadow:0 0 ${heat * 90}px #ff3b4766">${Math.round(bpm)}</div>
+      <div class="abs center disp" style="top:860px;font-size:110px;color:${col}">BPM</div>
+      <svg class="abs" style="left:0;top:0" width="1080" height="1920"><polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="9" stroke-linejoin="round" stroke-linecap="round" style="filter:drop-shadow(0 0 14px ${col})"/>
+      ${head < 1080 ? `<circle cx="${head}" cy="${pts.length ? pts[pts.length - 1].split(',')[1] : 1290}" r="14" fill="#fff"/>` : ''}</svg>
+      <div class="abs center src" style="top:1460px;${rise(t, .6)}">Source: The Athletic, Oct 2025</div>`;
+  }},
+
+  // Cut 7: sitting vs standing bars, +30 threshold.
+  s07_plus30: { dur: 3.5, render(t) {
+    const base = 1380, k = 6.2;
+    const a = 70 * outCubic(seg(t, .1, .8)), b = 100 * outCubic(seg(t, .6, 1.5));
+    const bar = (x, v, col, name) => `
+      <div class="abs" style="left:${x}px;top:${base - v * k}px;width:280px;height:${v * k}px;background:${col};border-radius:16px 16px 0 0"></div>
+      <div class="abs disp" style="left:${x}px;width:280px;text-align:center;top:${base - v * k - 130}px;font-size:110px;opacity:${clamp(v / 20)}">${Math.round(v)}${name === 'STANDING' && v > 99.5 ? '+' : ''}</div>
+      <div class="abs label" style="left:${x}px;width:280px;text-align:center;top:${base + 24}px;font-size:40px;color:var(--muted)">${name}</div>`;
+    const p = outBack(seg(t, 1.6, 2.0)), l = outCubic(seg(t, 1.5, 1.9));
+    return `
+      <div class="abs center label" style="top:330px;font-size:52px;${rise(t, 0)}">Just from standing up</div>
+      ${bar(180, a, '#3a424c', 'SITTING')}
+      ${bar(620, b, 'var(--red)', 'STANDING')}
+      <div class="abs" style="left:150px;top:${base - 70 * k - 3}px;width:${l * 780}px;border-top:6px dashed #fff8"></div>
+      <div class="abs disp" style="left:620px;width:280px;text-align:center;top:${base - 85 * k - 55}px;font-size:96px;color:#fff;transform:scale(${p});text-shadow:0 4px 20px #000">+30</div>
+      <div class="abs center label" style="top:1510px;font-size:38px;color:var(--muted);${rise(t, 2.1)}">The POTS threshold</div>`;
+  }},
+
+  // Cut 10: LONG COVID title with symptom chips; POTS highlighted.
+  s10_longcovid: { dur: 3.5, render(t) {
+    const p = outBack(seg(t, 0, .4));
+    const chips = ['Fatigue', 'Brain fog', 'Shortness of breath', 'Palpitations', 'Dizziness', 'POTS'];
+    const html = chips.map((c, i) => {
+      const q = outBack(seg(t, .5 + i * .22, .85 + i * .22)), hot = c === 'POTS';
+      const glow = hot ? Math.max(0, Math.sin((t - 1.9) * 9)) * seg(t, 1.9, 2.0) : 0;
+      return `<span class="chip" style="transform:scale(${q});${hot ? `background:var(--red);border-color:var(--red);font-size:60px;box-shadow:0 0 ${30 + glow * 40}px #ff3b47aa` : ''}">${c}</span>`;
+    }).join('');
+    return `<div class="abs center disp" style="top:470px;font-size:230px;transform:scale(${lerp(1.6, 1, p)});opacity:${clamp(p * 3)}">LONG<br>COVID</div>
+      <div class="abs center" style="top:1000px;padding:0 60px">${html}</div>`;
+  }},
+
+  // Cut 11: 17 million counter + 100-person grid (17M / ~260M US adults ≈ 7 in 100).
+  s11_17m: { dur: 4.5, render(t) {
+    const n = 17e6 * outExpo(seg(t, .15, 2.2));
+    let grid = '';
+    for (let i = 0; i < 100; i++) {
+      const r = Math.floor(i / 10), c = i % 10, on = [33, 36, 45, 54, 57, 63, 66].includes(i);
+      const q = fade(t, .3 + (r + c) * .04, .3), hot = on && t > 2.3;
+      grid += `<div class="abs" style="left:${c * 66}px;top:${r * 66}px;opacity:${q};transform:scale(${hot ? 1 + .25 * (1 - seg(t, 2.3, 2.7)) : 1})">${person(hot ? '#ff3b47' : '#3a424c', 56)}</div>`;
+    }
+    return `
+      <div class="abs center disp" style="top:330px;font-size:190px">${fmt(n)}</div>
+      <div class="abs center label" style="top:530px;font-size:44px;${rise(t, .3)}">US adults with long COVID</div>
+      <div class="abs" style="left:213px;top:650px;width:660px;height:660px">${grid}</div>
+      <div class="abs center label" style="top:1340px;font-size:40px;color:var(--red);${rise(t, 2.4)}">About 7 in every 100 adults</div>
+      <div class="abs center src" style="top:1430px;${rise(t, .6)}">KFF analysis of CDC Household Pulse, Mar 2024</div>`;
+  }},
+
+  // Cut 12: 79% ring.
+  s12_79: { dur: 3.5, render(t) {
+    const p = outCubic(seg(t, .15, 1.7)), v = 79 * p, R = 330, C = 2 * Math.PI * R;
+    return `
+      <svg class="abs" style="left:0;top:0" width="1080" height="1920">
+        <circle cx="540" cy="820" r="${R}" fill="none" stroke="#252b33" stroke-width="56"/>
+        <circle cx="540" cy="820" r="${R}" fill="none" stroke="var(--red)" stroke-width="56" stroke-linecap="round"
+          stroke-dasharray="${C * v / 100} ${C}" transform="rotate(-90 540 820)" style="filter:drop-shadow(0 0 18px #ff3b4777)"/>
+      </svg>
+      <div class="abs center disp" style="top:725px;font-size:190px">${Math.round(v)}%</div>
+      <div class="abs center label" style="top:1220px;font-size:50px;line-height:1.25;${rise(t, .9)}">say it limits their<br>daily activities</div>
+      <div class="abs center src" style="top:1430px;${rise(t, 1.1)}">KFF analysis of CDC Household Pulse, Mar 2024</div>`;
+  }},
+
+  // Cut 13: 2 to 4 million out of work, range band on a 0 to 5M axis.
+  s13_workers: { dur: 4.5, render(t) {
+    const x0 = 120, w = 840, X = m => x0 + w * m / 5;
+    const a = outCubic(seg(t, .9, 1.3)), b = outCubic(seg(t, 1.3, 2.2));
+    const left = X(2), right = lerp(X(2), X(4), b);
+    let ticks = '';
+    for (let m = 0; m <= 5; m++) ticks += `<div class="abs" style="left:${X(m) - 2}px;top:1100px;width:4px;height:30px;background:#5a636e"></div><div class="abs label" style="left:${X(m) - 60}px;width:120px;text-align:center;top:1150px;font-size:34px;color:var(--muted)">${m}M</div>`;
+    return `
+      <div class="abs center label" style="top:380px;font-size:50px;color:var(--muted);${rise(t, 0)}">Out of work from long COVID</div>
+      <div class="abs center disp" style="top:480px;font-size:250px;${rise(t, .15, .5, 60)}">2–4<span style="font-size:150px"> MILLION</span></div>
+      <div class="abs" style="left:${x0}px;top:1112px;width:${w * fade(t, .5, .4)}px;height:6px;background:#3a424c"></div>
+      ${ticks}
+      <div class="abs" style="left:${left}px;top:${1000 + (1 - a) * 60}px;width:${Math.max(16, right - left)}px;height:96px;background:var(--red);border-radius:12px;opacity:${a};box-shadow:0 0 40px #ff3b4788"></div>
+      <div class="abs center label" style="top:1270px;font-size:44px;${rise(t, 2.2)}">US workers</div>
+      <div class="abs center src" style="top:1430px;${rise(t, .6)}">Brookings Institution, 2022</div>`;
+  }},
+
+  // Cut 14: $170B lost wages counter.
+  s14_wages: { dur: 4.5, render(t) {
+    const v = 170 * outExpo(seg(t, .15, 2.0)), st = outBack(seg(t, 2.2, 2.55));
+    return `
+      <div class="abs center label" style="top:470px;font-size:52px;color:var(--muted);${rise(t, 0)}">Lost wages</div>
+      <div class="abs center disp" style="top:570px;font-size:340px;color:var(--green);text-shadow:0 0 70px #39d98a44">$${Math.round(v)}B</div>
+      <div class="abs center" style="top:1000px"><span class="disp" style="display:inline-block;font-size:120px;padding:14px 46px;border:10px solid var(--ink);border-radius:18px;transform:rotate(-6deg) scale(${lerp(2.2, 1, st)});opacity:${clamp(st * 2)}">EVERY YEAR</span></div>
+      <div class="abs center src" style="top:1430px;${rise(t, .6)}">Brookings Institution, 2022</div>`;
+  }},
+
+  // Cut 15: David Cutler name card, setting up the next number.
+  s15_cutler: { dur: 3.5, render(t) {
+    const l = outCubic(seg(t, 0, .5)), n = outCubic(seg(t, .25, .8)), r = outCubic(seg(t, .5, 1.0));
+    const dots = '.'.repeat(1 + Math.floor((t * 3) % 3));
+    return `
+      <div class="abs" style="left:110px;top:640px;width:16px;height:${300 * l}px;background:var(--red)"></div>
+      <div class="abs" style="left:160px;top:640px;overflow:hidden;height:190px"><div class="disp" style="font-size:170px;transform:translateY(${(1 - n) * 190}px)">DAVID CUTLER</div></div>
+      <div class="abs label" style="left:164px;top:860px;font-size:42px;color:var(--muted);opacity:${r};transform:translateX(${(1 - r) * -30}px)">Economist · Harvard University</div>
+      <div class="abs label" style="left:110px;top:1120px;font-size:56px;${rise(t, 1.3)}">Total cost of long COVID<span style="color:var(--red)">${t > 1.6 ? dots : ''}</span></div>`;
+  }},
+
+  // Cut 16: $3.7 TRILLION slam with shake and flash.
+  s16_trillion: { dur: 3.5, render(t) {
+    const p = outBack(seg(t, .05, .3)), q = outBack(seg(t, .35, .6));
+    const [sx, sy] = shake(t, .3, .45, 26), flash = .35 * (1 - seg(t, .28, .5)) * (t >= .28 ? 1 : 0);
+    return `<div class="abs" style="inset:0;transform:translate(${sx}px,${sy}px)">
+        <div class="abs center disp" style="top:520px;font-size:440px;transform:scale(${lerp(2.4, 1, p)});opacity:${clamp(p * 3)}">$3.7</div>
+        <div class="abs center disp" style="top:980px;font-size:200px;color:var(--red);transform:scale(${lerp(1.8, 1, q)});opacity:${clamp(q * 3)};text-shadow:0 0 60px #ff3b4766">TRILLION</div>
+      </div>
+      <div class="abs" style="inset:0;background:#fff;opacity:${flash}"></div>
+      <div class="abs center src" style="top:1430px;${rise(t, .9)}">Estimated total US cost · Cutler, JAMA Health Forum, 2022</div>`;
+  }},
+
+  // Cut 17: "COVID is over." headline gets struck out.
+  s17_over: { dur: 3.5, render(t) {
+    const c = outCubic(seg(t, 0, .5)), s = inOut(seg(t, .9, 1.35)), st = outBack(seg(t, 1.6, 1.95));
+    return `
+      <div class="abs" style="left:110px;top:${640 + (1 - c) * 120}px;width:860px;padding:60px 56px;background:#f4f1ea;color:#111;border-radius:6px;transform:rotate(-2.5deg);opacity:${c};box-shadow:0 30px 80px #000a">
+        <div style="font:700 30px var(--body);letter-spacing:.14em;color:#777;border-bottom:3px solid #111;padding-bottom:14px">THE HEADLINES</div>
+        <div style="position:relative;display:inline-block;white-space:nowrap;font:700 112px/1.05 'Caladea','DejaVu Serif',serif;margin-top:26px">COVID is over.
+          <div class="abs" style="left:-10px;top:52%;height:16px;width:${s * 104}%;background:var(--red);border-radius:8px;transform:rotate(-3deg)"></div></div>
+      </div>
+      <div class="abs center disp" style="top:1180px;font-size:120px;white-space:nowrap;color:var(--red);transform:rotate(-4deg) scale(${lerp(2, 1, st)});opacity:${clamp(st * 2)}">NOT FOR 17 MILLION</div>`;
+  }},
+
+  // Cut 20: end card.
+  s20_endcard: { dur: 2.5, render(t) {
+    const p = outBack(seg(t, 0, .4));
+    return `
+      <div class="abs center disp" style="top:640px;font-size:250px;transform:scale(${lerp(1.5, 1, p)});opacity:${clamp(p * 3)}">FOLLOW</div>
+      <div class="abs center label" style="top:930px;font-size:50px;line-height:1.3;${rise(t, .35)}">for more history<br>&amp; long COVID</div>
+      <div class="abs center src" style="top:1180px;font-size:38px;${rise(t, .7)}">Sources in caption ↓</div>`;
+  }},
+};
+
+window.SCENES = Object.fromEntries(Object.entries(S).map(([k, v]) => [k, { dur: v.dur, alpha: !!v.alpha }]));
+window.renderFrame = (id, t) => {
+  const st = document.getElementById('stage');
+  st.className = S[id].alpha ? '' : 'bg';
+  st.innerHTML = S[id].render(t);
+};
+</script>
