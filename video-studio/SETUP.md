@@ -120,6 +120,76 @@ Upload `out/porzingis.mp4`. Paste the sources from the bottom of `script.md` int
 
 Or ask Claude: "start a new video project called X from this script."
 
+## Phone footage videos (talking to camera)
+
+For videos you film on your phone. Captions come from what you say, and graphics cut in full screen while your audio keeps playing.
+
+### 1. Import your clips
+AirDrop or copy the videos to your computer, then:
+```
+npm run import myvideo ~/Downloads/IMG_1234.MOV ~/Downloads/IMG_1235.MOV
+```
+This makes 1080x1920, steady 30fps copies in `public/myvideo/footage/`. Phones record in a format that drifts out of sync and won't preview in the browser, so always import first. Clips are used in file name order.
+
+### 2. Make captions
+```
+npm run transcribe myvideo
+```
+Writes `footage/IMG_1234.json` next to each clip: every word with its timing. The first run downloads the speech model (about 500 MB, one time). On a Mac this needs Xcode tools: `xcode-select --install`.
+
+A word came out wrong? Open the `.json` and fix the text, or tell Claude "change 'fourty' to 'forty' in myvideo". Timing stays the same.
+
+### 3. Rough cut
+```
+npm run rough-cut myvideo
+```
+Writes `projects/myvideo.ts` with your pauses and "um"s cut out, one line per kept piece, with what you said next to it. Pauses longer than 0.5s get cut. For a looser cut: `npm run rough-cut myvideo 1`.
+
+### 4. Edit
+`npm run studio`, pick **myvideo**. Change `projects/myvideo.ts` and the preview updates live.
+
+```ts
+clips: [
+  { src: 'footage/IMG_1234.mp4', from: 0.4, to: 3.1 },              // So today I want to talk about rent
+  { src: 'footage/IMG_1234.mp4', from: 5.7, to: 8.4, zoom: 1.2,     // Most people think it's coffee
+    graphics: [{ at: 1.5, for: 1.2, type: 'title', text: 'COFFEE?', sub: 'not the problem' }] },
+  { src: 'footage/IMG_1235.mp4', from: 2.0, to: 6.5,
+    graphics: [{ at: 0.3, for: 2, type: 'stat', value: 30, suffix: '%', label: 'of your paycheck', sfx: 'sfx/impact.wav' }] },
+],
+```
+
+| To do this | Change |
+|------------|--------|
+| Cut a piece | Delete its line |
+| Reorder | Move lines |
+| Trim | Change `from` / `to` (seconds in the original file) |
+| Punch in | `zoom: 1.2`, and `focus: [0.5, 0.3]` to aim it (0 to 1, left/top to right/bottom) |
+| Mute a piece | `volume: 0` |
+| Hide captions on a piece | `captions: false` |
+
+Captions follow your edits automatically.
+
+**Graphics** go inside a clip. `at` is seconds into that piece, `for` is how long it stays up. Your voice keeps playing underneath. Captions hide during a graphic unless you add `captions: true`. Add `sfx: 'sfx/name.wav'` for a sound on entry (prep it with `scripts/sfx-prep.sh`).
+
+| type | Options |
+|------|---------|
+| title | `text`, `sub`, `color` |
+| stat | `value`, `prefix`, `suffix`, `decimals`, `label`, `source`, `color` (counts up) |
+| image | `src` (e.g. `photos/x.jpg`), `zoom`, `focus` |
+| clip | `src` (any video, e.g. `broll/x.mp4`), `trim` |
+
+**Caption look** is `captionStyle` at the top of the file: `highlight` (color of the word being said), `words` (how many on screen), `top` (height, out of 1920), `size`, `uppercase`.
+
+**Music**: prep a track with `scripts/music-prep.sh <file> myvideo`, then add `music: { src: 'music/track.wav', volume: 0.08 }`.
+
+Or tell Claude what you want ("put a big 30% on screen when I say thirty percent", "cut the part about my landlord") and it edits the file.
+
+### 5. Render
+```
+npm run render myvideo
+```
+Output: `out/myvideo.mp4`.
+
 ## Cut types (projects/<id>.ts)
 | type | What it shows |
 |------|---------------|

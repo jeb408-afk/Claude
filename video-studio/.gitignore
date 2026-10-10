@@ -8,4 +8,6 @@ public/*/sfx/*
 public/*/photos/*
 public/*/broll/*
 public/*/aroll.mp4
+public/*/footage/*
 !public/*/*/.gitkeep
+.whisper/

@@ -5,12 +5,16 @@
   "scripts": {
     "studio": "remotion studio",
     "render": "bash scripts/render.sh",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "import": "bash scripts/phone-import.sh",
+    "transcribe": "node scripts/transcribe.mjs",
+    "rough-cut": "node scripts/rough-cut.mjs"
   },
   "dependencies": {
     "@remotion/captions": "4.0.534",
     "@remotion/cli": "4.0.534",
     "@remotion/fonts": "^4.0.534",
+    "@remotion/install-whisper-cpp": "^4.0.534",
     "@remotion/media-utils": "4.0.534",
     "react": "19.1.0",
     "react-dom": "19.1.0",
