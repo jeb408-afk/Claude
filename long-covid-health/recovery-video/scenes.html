@@ -92,7 +92,7 @@ function loadData() {
   const preFrom = hasPre ? Math.max(0, onsetI - 30) : 0, preTo = hasPre ? onsetI : Math.min(30, rows.length);
   const crashFrom = hasPre ? onsetI : 0;
   const crash = {
-    hasPre, from: Math.max(0, (onsetI ?? 0) - 45), to: Math.min(rows.length, (onsetI ?? 0) + 100),
+    hasPre, from: Math.max(0, (onsetI ?? 0) - 120), to: Math.min(rows.length, (onsetI ?? 0) + 110),
     preSteps: avg(preFrom, preTo, 'steps'), preRHR: avg(preFrom, preTo, 'rhr'),
     lowSteps: rollMinMax(crashFrom, crashFrom + 120, 'steps', 14, 'min'),
     peakRHR: rollMinMax(crashFrom, crashFrom + 120, 'rhr', 14, 'max'),
@@ -110,8 +110,25 @@ function loadData() {
   for (let i = onsetI ?? 0; i + 7 <= rows.length; i += 7) { const st = avg(i, i + 7, 'steps'), hr = avg(i, i + 7, 'rhr'); if (st != null && hr != null) weeks.push({ i, date: rows[i].date, steps: st, rhr: hr }); }
   const pearson = (a, b) => { const n = a.length; if (n < 4) return null; const ma = mean(a), mb = mean(b); let sab = 0, saa = 0, sbb = 0; for (let k = 0; k < n; k++) { sab += (a[k] - ma) * (b[k] - mb); saa += (a[k] - ma) ** 2; sbb += (b[k] - mb) ** 2; } return sab / Math.sqrt(saa * sbb); };
   const r = pearson(weeks.map(w => w.steps), weeks.map(w => w.rhr));
+  const firstHR = rows.findIndex((x, i) => i >= (onsetI ?? 0) && x.rhr != null);
+  crash.firstHR = firstHR < 0 ? null : firstHR;
+  if (firstHR >= 0) {
+    const mo = rows[firstHR].date.slice(0, 7), mr = rows.filter(x => x.date.slice(0, 7) === mo);
+    crash.hrMonth = mo; crash.hrRHR = mean(mr.map(x => x.rhr)); crash.hrT100 = mean(mr.map(x => x.tachy100)); crash.hrAvg = mean(mr.map(x => x.hrAvg));
+    if (rows.filter(x => x.date.slice(0, 7) === mo && x.rhr != null).length < 15) crash.hrMonth = null;
+  }
+  climb.chartFrom = firstHR >= 0 ? firstHR : lowI;
+  climb.lowI = lowI;
+  const months = [];
+  const byMo = {}; rows.forEach(x => { if (x.date < (cfg.onset || '')) return; (byMo[x.date.slice(0, 7)] ||= []).push(x); });
+  for (const [mo, mr] of Object.entries(byMo)) {
+    const hrDays = mr.filter(x => x.tachy100 != null && x.steps != null);
+    if (hrDays.length < 20) continue;
+    const t = mean(hrDays.map(x => x.tachy100)), st = mean(hrDays.map(x => x.steps));
+    months.push({ mo, t100: t, steps: st, cost: st ? t / (st / 1000) : null });
+  }
   D = {
-    crash, climb, weeks, r,
+    crash, climb, weeks, r, months,
     rows, cfg, onsetI, worst, pem, low,
     first: { steps: mean(first30.map(r => r.steps)), rhr: mean(first30.map(r => r.rhr)) },
     last: { steps: mean(last30.map(r => r.steps)), rhr: mean(last30.map(r => r.rhr)) },
@@ -278,7 +295,7 @@ const bigStat = (label, from, to, delta, color) => `<div class="card" style="fle
 S.img_crash = { dur: 1, image: true, render() {
   const c = D.crash, marks = [{ i: D.onsetI, color: '#ff3b47' }];
   const a = timeChart({ y: 560, h: 380, key: 'steps7', bars: 'steps', color: '#4ea1ff', label: 'Steps per day', unit: '', marks, zero: true, from: c.from, to: c.to });
-  const b = timeChart({ y: 1120, h: 330, key: 'rhr', color: '#ff3b47', label: 'Resting heart rate', unit: 'bpm', marks, from: c.from, to: c.to });
+  const b = timeChart({ y: 1120, h: 330, key: 'rhr7', color: '#ff3b47', label: 'Resting heart rate', unit: c.preRHR == null && c.firstHR != null ? 'bpm · tracking began ' + fmtDate(D.rows[c.firstHR].date) : 'bpm', marks, from: c.from, to: c.to });
   const stPct = c.preSteps && c.lowSteps ? (c.lowSteps.v / c.preSteps - 1) * 100 : null;
   const hrUp = c.preRHR != null && c.peakRHR ? c.peakRHR.v - c.preRHR : null;
   const fromLab = c.hasPre ? 'Before' : 'First month';
@@ -287,12 +304,17 @@ S.img_crash = { dur: 1, image: true, render() {
     ${a.html}${b.html}
     <div class="abs" style="left:70px;right:70px;top:1560px;display:flex;gap:28px">
       ${bigStat(`Steps/day · ${fromLab.toLowerCase()} → worst 2 wks`, fmtK(c.preSteps), fmtK(c.lowSteps?.v), stPct == null ? '–' : sgn(stPct) + '%', 'var(--blue)')}
-      ${bigStat(`Resting HR · ${fromLab.toLowerCase()} → peak 2 wks`, fmt(c.preRHR), fmt(c.peakRHR?.v), hrUp == null ? '–' : sgn(hrUp) + ' bpm', 'var(--red)')}
+      ${c.preRHR != null ? bigStat(`Resting HR · ${fromLab.toLowerCase()} → peak 2 wks`, fmt(c.preRHR), fmt(c.peakRHR?.v), hrUp == null ? '–' : sgn(hrUp) + ' bpm', 'var(--red)')
+        : c.hrMonth ? `<div class="card" style="flex:1"><div class="label" style="font-size:26px;color:var(--muted)">Heart rate · ${MONTHS[+c.hrMonth.slice(5) - 1]} ${c.hrMonth.slice(0, 4)}, first month tracked</div>
+            <div class="disp" style="font-size:96px;color:var(--red);margin-top:10px">${fmt(c.hrT100)} min</div>
+            <div style="font:700 36px var(--body);margin-top:6px">a day over 100 bpm · resting ${fmt(c.hrRHR)}</div></div>` : ''}
     </div>${exampleMark()}`;
 }};
 S.img_climb = { dur: 1, image: true, render() {
-  const c = D.climb, from = c.from;
+  const c = D.climb, from = c.chartFrom;
   const a = timeChart({ y: 560, h: 380, key: 'steps7', bars: 'steps', color: '#4ea1ff', label: 'Steps per day', unit: '(7-day avg)', zero: true, from });
+  const band = (i0, i1, color, text) => { const xa = a.X(i0 - from), xb = a.X(Math.min(D.days, i1) - 1 - from); return `<div class="abs" style="left:${xa}px;width:${xb - xa}px;top:520px;height:950px;background:${color};border-radius:12px"></div><div class="abs label" style="left:${xa}px;width:${Math.max(160, xb - xa)}px;top:480px;font-size:22px;color:var(--muted);text-align:center">${text}</div>`; };
+  const bands = band(c.lowI, c.lowI + 30, '#ffffff10', 'Worst month') + band(D.days - 30, D.days, '#39d98a18', 'Last 30 days');
   const hasWalk = D.rows.slice(from).some(r => r.walkAny7 != null);
   const b = timeChart({ y: 1120, h: 330, key: 'rhr7', color: '#ff3b47', label: 'Heart rate', unit: 'bpm', from, extra: hasWalk ? [{ key: 'walkAny7', color: '#ffc23d' }] : [] });
   const ratio = c.low.steps ? c.now.steps / c.low.steps : null;
@@ -301,7 +323,7 @@ S.img_climb = { dur: 1, image: true, render() {
   const hrWord = d => d == null ? '' : Math.abs(d) <= 3 ? 'about the same heart rate' : d < 0 ? 'a lower heart rate' : 'a higher heart rate';
   return `<div class="abs center label" style="top:230px;font-size:38px;color:var(--muted)">Worst month → last 30 days</div>
     <div class="abs center disp" style="top:300px;font-size:150px">THE CLIMB</div>
-    ${a.html}${b.html}
+    ${bands}${a.html}${b.html}
     <div class="abs legend label" style="right:90px;top:1058px;font-size:26px;display:flex;gap:30px"><span style="color:#ff3b47">— Resting</span>${hasWalk ? '<span style="color:#ffc23d">— While walking</span>' : ''}</div>
     <div class="abs" style="left:70px;right:70px;top:1560px;display:flex;gap:20px">
       ${bigStat('Steps/day', fmtK(c.low.steps), fmtK(c.now.steps), ratio == null ? '–' : fmt(ratio, 1) + '×', 'var(--blue)')}
@@ -310,33 +332,31 @@ S.img_climb = { dur: 1, image: true, render() {
     </div>
     <div class="abs center" style="top:1830px;font:600 40px var(--body)">${ratio == null ? '' : `${fmt(ratio, 1)}× the steps, ${hrWord(hasWalk ? dW : dR)}`}</div>${exampleMark()}`;
 }};
-S.img_scatter = { dur: 1, image: true, render() {
-  const W = D.weeks; if (!W.length) return '<div class="abs center disp" style="top:800px;font-size:80px">Not enough weeks</div>';
-  const x0 = 170, x1 = 990, y0 = 560, y1 = 1440;
-  const sx = W.map(w => w.steps), sy = W.map(w => w.rhr);
-  const lx = 0, hx = Math.max(...sx) * 1.08, ly = Math.min(...sy) - 2, hy = Math.max(...sy) + 2;
-  const X = v => x0 + (v - lx) / (hx - lx) * (x1 - x0), Y = v => y1 - (v - ly) / (hy - ly) * (y1 - y0);
-  const col = k => { const p = k / Math.max(1, W.length - 1); const a = [255, 59, 71], b = [57, 217, 138]; return `rgb(${a.map((v, j) => Math.round(v + (b[j] - v) * p)).join(',')})`; };
+S.img_cost = { dur: 1, image: true, render() {
+  const M = D.months; if (M.length < 2) return '<div class="abs center disp" style="top:800px;font-size:80px">Not enough months</div>';
+  const x0 = 150, x1 = 990, y0 = 600, y1 = 1300, hi = Math.max(...M.map(m => m.cost)) * 1.15;
+  const bw = (x1 - x0) / M.length, Y = v => y1 - v / hi * (y1 - y0);
   let svg = `<svg class="abs" style="left:0;top:0" width="1080" height="1920">`;
-  for (let k = 0; k <= 3; k++) { const v = lx + (hx - lx) * k / 3; svg += `<line x1="${X(v)}" x2="${X(v)}" y1="${y0}" y2="${y1}" stroke="#222830" stroke-width="2"/><text x="${X(v)}" y="${y1 + 44}" fill="#6b747e" font-size="28" text-anchor="middle">${fmtK(v)}</text>`; }
-  for (let k = 0; k <= 3; k++) { const v = ly + (hy - ly) * k / 3; svg += `<line x1="${x0}" x2="${x1}" y1="${Y(v)}" y2="${Y(v)}" stroke="#222830" stroke-width="2"/><text x="${x0 - 16}" y="${Y(v) + 9}" fill="#6b747e" font-size="28" text-anchor="end">${fmt(v)}</text>`; }
-  svg += `<path d="${W.map((w, k) => (k ? 'L' : 'M') + X(w.steps) + ',' + Y(w.rhr)).join('')}" fill="none" stroke="#3a424c" stroke-width="3"/>`;
-  W.forEach((w, k) => { svg += `<circle cx="${X(w.steps)}" cy="${Y(w.rhr)}" r="15" fill="${col(k)}" stroke="#0a0c0f" stroke-width="4"/>`; });
+  for (let k = 0; k <= 2; k++) { const v = hi * k / 2; svg += `<line x1="${x0}" x2="${x1}" y1="${Y(v)}" y2="${Y(v)}" stroke="#222830" stroke-width="2"/><text x="${x0 - 16}" y="${Y(v) + 9}" fill="#5d6670" font-size="26" text-anchor="end">${fmt(v)}</text>`; }
+  const col = k => { const p = k / Math.max(1, M.length - 1); const a = [255, 59, 71], b = [57, 217, 138]; return `rgb(${a.map((v, j) => Math.round(v + (b[j] - v) * p)).join(',')})`; };
+  M.forEach((m, k) => {
+    const x = x0 + k * bw + 8, w = bw - 16, top = Y(m.cost), r = Math.min(10, w / 2);
+    svg += `<path d="M${x},${y1}V${top + r}Q${x},${top} ${x + r},${top}H${x + w - r}Q${x + w},${top} ${x + w},${top + r}V${y1}Z" fill="${col(k)}"/>`;
+    svg += `<text x="${x + w / 2}" y="${top - 14}" fill="#f5f5f2" font-size="30" font-weight="700" text-anchor="middle">${fmt(m.cost)}</text>`;
+    svg += `<text x="${x + w / 2}" y="${y1 + 44}" fill="#8d959e" font-size="28" text-anchor="middle">${MONTHS[+m.mo.slice(5) - 1]}</text>`;
+  });
   svg += `</svg>`;
-  const f = W[0], l = W[W.length - 1];
-  const tag = (w, text, color, dy) => `<div class="abs label" style="left:${Math.min(820, X(w.steps) + 24)}px;top:${Y(w.rhr) + dy}px;font-size:30px;color:${color}">${text}<br><span style="font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)">${fmtDate(w.date)}</span></div>`;
-  const r = D.r;
-  const words = r == null ? '' : r <= -0.5 ? 'As my steps went up, my resting heart rate went down.' : r < -0.2 ? 'More steps tended to come with a lower resting heart rate.' : r < 0.2 ? 'My resting heart rate held steady as steps changed.' : 'Weeks with more steps had a higher resting heart rate.';
-  return `<div class="abs center label" style="top:230px;font-size:38px;color:var(--muted)">Each dot is one week since COVID</div>
-    <div class="abs center disp" style="top:310px;font-size:100px">MORE STEPS, CALMER HEART</div>
-    <div class="abs label" style="left:${x0}px;top:${y0 - 60}px;font-size:30px;color:#ff3b47">Resting heart rate <span style="color:var(--muted);text-transform:none;letter-spacing:0;font-weight:600">bpm</span></div>
+  const f = M[0], l = M[M.length - 1], pct = (l.cost / f.cost - 1) * 100;
+  const stepPct = (l.steps / f.steps - 1) * 100;
+  return `<div class="abs center label" style="top:230px;font-size:38px;color:var(--muted)">Heart-rate cost of moving</div>
+    <div class="abs center disp" style="top:300px;font-size:104px;line-height:1">MINUTES OVER 100 BPM<br><span style="color:var(--muted);font-size:80px">PER 1,000 STEPS</span></div>
     ${svg}
-    <div class="abs label" style="left:0;right:90px;text-align:right;top:${y1 + 70}px;font-size:30px;color:#4ea1ff">Average steps per day →</div>
-    ${tag(f, 'First weeks', '#ff3b47', -60)}${tag(l, 'Now', '#39d98a', -20)}
-    <div class="abs card" style="left:70px;right:70px;top:1620px;display:flex;gap:30px;align-items:center">
-      <div class="disp" style="font-size:110px;color:var(--green);white-space:nowrap">r = ${r == null ? '–' : (r < 0 ? '−' : '') + fmt(Math.abs(r), 2)}</div>
-      <div style="font:600 36px/1.3 var(--body)">${words}<div class="note" style="font-size:26px;margin-top:8px">Correlation of weekly steps and resting HR, ${W.length} weeks</div></div>
-    </div>${exampleMark()}`;
+    <div class="abs" style="left:70px;right:70px;top:1420px;display:flex;gap:28px">
+      ${bigStat(`${MONTHS[+f.mo.slice(5) - 1]} → ${MONTHS[+l.mo.slice(5) - 1]} · per 1,000 steps`, fmt(f.cost, 1), fmt(l.cost, 1), sgn(pct) + '%', 'var(--green)')}
+      ${bigStat('Steps per day', fmtK(f.steps), fmtK(l.steps), sgn(stepPct) + '%', 'var(--blue)')}
+    </div>
+    <div class="abs center" style="top:1720px;font:600 40px/1.3 var(--body);padding:0 90px">${stepPct >= -5 ? 'Same or more walking, far less time with a racing heart.' : 'Each step now costs my heart far less.'}</div>
+    <div class="abs center note" style="top:1840px;font-size:26px">Minutes a day at 100+ bpm ÷ steps a day × 1,000. Monthly averages, sleep excluded.</div>${exampleMark()}`;
 }};
 
 window.SCENES = Object.fromEntries(Object.entries(S).map(([k, v]) => [k, { dur: v.dur, alpha: false, image: !!v.image }]));

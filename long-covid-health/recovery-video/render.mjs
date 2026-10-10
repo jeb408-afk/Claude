@@ -20,9 +20,10 @@ if (stills || images) args.shift();
 const outDir = path.resolve(args.shift() || path.join(here, 'out'));
 mkdirSync(outDir, { recursive: true });
 
+const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(here, 'data');
 const DATA = {
-  csv: readFileSync(path.join(here, 'data/daily.csv'), 'utf8'),
-  config: JSON.parse(readFileSync(path.join(here, 'data/config.json'), 'utf8')),
+  csv: readFileSync(path.join(dataDir, 'daily.csv'), 'utf8'),
+  config: JSON.parse(readFileSync(path.join(dataDir, 'config.json'), 'utf8')),
 };
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
