@@ -1,0 +1,13 @@
+node_modules/
+out/
+inbox/
+# Licensed or personal media stays local. Keep the folder structure, not the files.
+public/*/audio/*
+public/*/music/*
+public/*/sfx/*
+public/*/photos/*
+public/*/broll/*
+public/*/aroll.mp4
+public/*/footage/*
+!public/*/*/.gitkeep
+.whisper/
