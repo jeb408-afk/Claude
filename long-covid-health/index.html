@@ -191,6 +191,15 @@ details[open] > summary { margin-bottom: 10px; }
     </div>
   </section>
 
+  <section class="panel" id="cardPanel">
+    <div class="panel-head">
+      <h2>Six-month heart rate picture</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="copyCard" type="button">Copy image</button></div>
+    </div>
+    <p class="small muted">Resting, overnight and walking heart rate by week for the last 6 months of your data. On iPhone, press and hold the picture to save or share it, or take a screenshot.</p>
+    <img id="cardImg" alt="Six-month heart rate summary" style="width:100%;max-width:540px;border:1px solid var(--line);border-radius:10px;justify-self:start">
+  </section>
+
   <section class="kpis" id="kpis" aria-label="Last 30 days summary"></section>
 
   <section class="panel">
@@ -633,6 +642,11 @@ function derive(raw, meta) {
         if (o.sleepMask && o.sleepMin >= 60) { for (let m = 0; m < 1440; m++) if (o.sleepMask[m] && o.hrAll[m]) night.push(o.hrAll[m]); }
         else for (let m = 0; m < 360; m++) if (o.hrAll[m]) night.push(o.hrAll[m]);
         o.nightHR = night.length >= 30 ? mean(night) : null;
+        // Walking HR: median HR in minutes of steady walking (60+ steps this minute and the one before)
+        if (ms) {
+          const wv = []; for (let m = 1; m < 1440; m++) if (hm[m] && ms[m] >= 60 && ms[m - 1] >= 60) wv.push(hm[m]);
+          o.walkHRCalc = wv.length >= 10 ? median(wv) : null; o.walkMin = wv.length;
+        }
         if (o.rhrCalc != null) { o.rhr = o.rhrCalc; o.rhrSrc = 'calc'; }
         else if (o.rhrApple != null) o.rhrSrc = 'apple';
       } else if (o.rhrApple != null) o.rhrSrc = 'apple';
@@ -1175,6 +1189,7 @@ function render() {
 
   renderRecovery();
   renderDataCheck();
+  renderCard();
   renderInsights(rows, { envelope, events, evRows, hours, strained, strainedP, L, P });
 }
 
@@ -1248,6 +1263,95 @@ function renderDataCheck() {
   const r = days.find(x => x.date === inp.value);
   $('#inspectOut').innerHTML = !r ? 'No data that day.' :
     `Steps <b class="mono">${fmt(r.steps)}</b> · Resting HR calculated <b class="mono">${fmt(r.rhrCalc)}</b> / Apple <b class="mono">${fmt(r.rhrApple)}</b> · HR low/avg/high <b class="mono">${r.hrAvg == null ? '–' : `${fmt(r.hrMin)}/${fmt(r.hrAvg)}/${fmt(r.hrMax)}`}</b> · Readings <b class="mono">${fmt(r.hrReadings)}</b> · Awake minutes with HR <b class="mono">${fmt(r.hrCover)}</b> · Asleep <b class="mono">${fmt(r.sleepMin / 60, 1)} h</b> ${r.sleepMin ? (r.sleepSrc === 'health' ? '(Health)' : '(estimated)') : ''} · HRV <b class="mono">${fmt(r.hrv)}</b>`;
+}
+
+// ---------- six-month picture (canvas) ----------
+function weeklyRows(days, keys) {
+  const weeks = new Map();
+  for (const r of days) { const wk = addDays(r.date, -((WEEKDAY(r.date) + 6) % 7)); if (!weeks.has(wk)) weeks.set(wk, []); weeks.get(wk).push(r); }
+  return [...weeks.entries()].map(([wk, rs]) => { const o = { date: wk }; for (const k of keys) o[k] = mean(rs.map(r => r[k])); return o; });
+}
+async function renderCard() {
+  const img = $('#cardImg'); if (!state.days.length) return;
+  try { await document.fonts.ready; } catch {}
+  const days = state.days.slice(-182);
+  const wk = weeklyRows(days, ['rhr', 'nightHR', 'walkHRCalc', 'walkHR', 'spikesStill', 'tachy100']);
+  const W = 1080, H = 1560, P = 64;
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  const C = { bg: '#ffffff', ink: '#12181d', ink2: '#4b5660', ink3: '#75808a', grid: '#e8ecef', line: '#dde2e6', hr: '#eb6834', night: '#4a3aa7', walk: '#2a78d6', base: '#8b949c' };
+  const F = (w, sz, fam) => `${w} ${sz}px ${fam}`;
+  const DISP = '"Bricolage Grotesque", system-ui, sans-serif', BODY = '"Public Sans", system-ui, sans-serif', MONO = '"JetBrains Mono", ui-monospace, monospace';
+  g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
+  g.fillStyle = C.ink3; g.font = F(600, 22, BODY); g.fillText('APPLE HEALTH · LONG COVID RECOVERY', P, P + 20);
+  g.fillStyle = C.ink; g.font = F(700, 56, DISP); g.fillText('Heart rate, last 6 months', P, P + 88);
+  g.fillStyle = C.ink2; g.font = F(400, 26, BODY);
+  g.fillText(`${fmtDateY(days[0].date)} to ${fmtDateY(days[days.length - 1].date)}${state.excludeSleep ? ' · sleep left out' : ''}${state.sample ? ' · EXAMPLE DATA' : ''}`, P, P + 132);
+
+  // stat tiles: first 4 weeks vs last 4 weeks
+  const first = wk.slice(0, 4), last = wk.slice(-4);
+  const stat = (k) => [mean(first.map(r => r[k])), mean(last.map(r => r[k]))];
+  const walkKey = nn(wk.map(r => r.walkHRCalc)).length ? 'walkHRCalc' : 'walkHR';
+  const tiles = [
+    { label: 'Resting HR', k: 'rhr', unit: 'bpm', d: 0 },
+    { label: 'Walking HR', k: walkKey, unit: 'bpm', d: 0 },
+    { label: 'Overnight HR', k: 'nightHR', unit: 'bpm', d: 0 },
+  ];
+  const ty = P + 170, tw = (W - 2 * P - 2 * 24) / 3, th = 150;
+  tiles.forEach((t, i) => {
+    const x = P + i * (tw + 24), [a, b] = stat(t.k);
+    g.strokeStyle = C.line; g.lineWidth = 2; g.beginPath(); g.roundRect(x, ty, tw, th, 16); g.stroke();
+    g.fillStyle = C.ink3; g.font = F(600, 20, BODY); g.fillText(t.label.toUpperCase(), x + 22, ty + 38);
+    g.fillStyle = C.ink; g.font = F(500, 50, MONO); const v = fmt(b, t.d); g.fillText(v, x + 22, ty + 96);
+    const vw = g.measureText(v).width; g.fillStyle = C.ink3; g.font = F(400, 22, MONO); g.fillText(t.unit, x + 30 + vw, ty + 96);
+    g.fillStyle = C.ink2; g.font = F(400, 21, BODY);
+    g.fillText(a != null && b != null ? `${sign(b - a, t.d)} vs first month (${fmt(a, t.d)})` : 'not enough data', x + 22, ty + 130);
+  });
+
+  // line charts
+  const chart = (y0, h, title, series, opts = {}) => {
+    g.fillStyle = C.ink; g.font = F(700, 30, DISP); g.fillText(title, P, y0);
+    let lx = W - P; g.font = F(400, 21, BODY);
+    for (const s of [...series].reverse()) {
+      const tw2 = g.measureText(s.label).width; lx -= tw2; g.fillStyle = C.ink2; g.fillText(s.label, lx, y0);
+      lx -= 34; g.fillStyle = s.color; if (s.bar) g.fillRect(lx, y0 - 16, 22, 16); else { g.fillRect(lx, y0 - 10, 26, 4); }
+      lx -= 22;
+    }
+    const top = y0 + 26, left = P + 56, right = W - P, bottom = top + h;
+    const vals = nn(series.flatMap(s => wk.map(r => r[s.key])));
+    if (!vals.length) { g.fillStyle = C.ink3; g.font = F(400, 24, BODY); g.fillText('No data for this yet', left, top + h / 2); return; }
+    let lo = opts.zero ? 0 : Math.min(...vals) - 3, hi = Math.max(...vals) + 3;
+    const ticks = niceTicks(lo, hi, 4); lo = ticks[0]; hi = ticks[ticks.length - 1];
+    const X = i => left + (i + 0.5) * (right - left) / wk.length;
+    const Y = v => bottom - (v - lo) / (hi - lo) * h;
+    g.font = F(400, 19, MONO); g.textAlign = 'right';
+    for (const t of ticks) { g.strokeStyle = C.grid; g.lineWidth = 1.5; g.beginPath(); g.moveTo(left, Y(t)); g.lineTo(right, Y(t)); g.stroke(); g.fillStyle = C.ink3; g.fillText(fmt(t, t % 1 ? 1 : 0), left - 12, Y(t) + 6); }
+    g.textAlign = 'center'; let lastMo = '';
+    wk.forEach((r, i) => { const mo = addDays(r.date, 3).slice(5, 7); if (mo !== lastMo) { lastMo = mo; g.fillStyle = C.ink3; g.fillText(MONTHS[+mo - 1], X(i), bottom + 30); } });
+    g.textAlign = 'left';
+    for (const s of series) {
+      if (s.bar) {
+        const bw = Math.min(36, Math.max(4, (right - left) / wk.length - 6));
+        g.fillStyle = s.color; wk.forEach((r, i) => { const v = r[s.key]; if (v == null) return; g.beginPath(); g.roundRect(X(i) - bw / 2, Y(v), bw, Y(lo) - Y(v), [4, 4, 0, 0]); g.fill(); });
+        continue;
+      }
+      g.strokeStyle = s.color; g.lineWidth = s.width || 4; g.lineJoin = 'round'; g.lineCap = 'round'; if (s.dash) g.setLineDash(s.dash);
+      g.beginPath(); let pen = false;
+      wk.forEach((r, i) => { const v = r[s.key]; if (v == null) { pen = false; return; } pen ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v)); pen = true; });
+      g.stroke(); g.setLineDash([]);
+      const lastI = wk.map(r => r[s.key]).findLastIndex(v => v != null);
+      if (lastI >= 0 && !s.dash) { g.fillStyle = s.color; g.beginPath(); g.arc(X(lastI), Y(wk[lastI][s.key]), 8, 0, 7); g.fill(); g.strokeStyle = C.bg; g.lineWidth = 3; g.stroke(); }
+    }
+  };
+  chart(ty + th + 90, 260, 'Resting and overnight', [{ key: 'rhr', label: 'Resting', color: C.hr }, { key: 'nightHR', label: 'Overnight', color: C.night }]);
+  const walkSeries = [{ key: 'walkHRCalc', label: 'Calculated', color: C.walk }];
+  if (nn(wk.map(r => r.walkHR)).length) walkSeries.push({ key: 'walkHR', label: "Apple's", color: C.base, dash: [10, 8], width: 3 });
+  chart(ty + th + 470, 260, 'While walking', walkSeries);
+  const spikeKey = nn(wk.map(r => r.spikesStill)).length ? 'spikesStill' : 'tachy100';
+  chart(ty + th + 850, 170, spikeKey === 'spikesStill' ? 'Spikes while still, per day' : 'Minutes at 100+ bpm, per day', [{ key: spikeKey, label: 'Weekly average', color: C.hr, bar: true }], { zero: true });
+  g.fillStyle = C.ink3; g.font = F(400, 20, BODY);
+  g.fillText('Weekly averages. Walking HR = median HR in minutes with 60+ steps. Not medical advice.', P, H - 40);
+  state.cardCanvas = c;
+  img.src = c.toDataURL('image/png');
 }
 
 function renderRecovery() {
@@ -1357,12 +1461,21 @@ $('#range').addEventListener('click', e => {
   $('#range').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); render();
 });
 $('#inspectDay').addEventListener('change', renderDataCheck);
+$('#copyCard').addEventListener('click', async () => {
+  const btn = $('#copyCard');
+  try {
+    const blob = await new Promise(res => state.cardCanvas.toBlob(res, 'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    btn.textContent = 'Copied';
+  } catch { btn.textContent = 'Copy not allowed here, press and hold the picture'; }
+  setTimeout(() => btn.textContent = 'Copy image', 2500);
+});
 $('#exSleep').checked = state.excludeSleep;
 $('#exSleep').addEventListener('change', e => { state.excludeSleep = e.target.checked; store.set('lc_exsleep', e.target.checked ? '1' : '0'); if (state.raw) { state.days = derive(state.raw, state.meta); render(); } });
 $('#detailDay').addEventListener('change', renderDayDetail);
 $('#onset').addEventListener('change', e => { state.onset = e.target.value; store.set('lc_onset', state.onset); render(); });
 $('#copyCsv').addEventListener('click', async () => {
-  const cols = ['date', 'steps', 'rhr', 'rhrBase', 'hrv', 'hrvBase', 'hrMin', 'hrAvg', 'hrMax', 'rhrApple', 'nightHR', 'at', 'atMin', 'tachy100', 'tachy120', 'stillHigh', 'spikes', 'spikesStill', 'walkHR', 'hrr', 'spo2', 'resp', 'vo2', 'sleep', 'walkSpeed', 'dist', 'flights', 'exer', 'status', 'exertion'];
+  const cols = ['date', 'steps', 'rhr', 'rhrBase', 'hrv', 'hrvBase', 'hrMin', 'hrAvg', 'hrMax', 'rhrApple', 'nightHR', 'walkHRCalc', 'walkMin', 'at', 'atMin', 'tachy100', 'tachy120', 'stillHigh', 'spikes', 'spikesStill', 'walkHR', 'hrr', 'spo2', 'resp', 'vo2', 'sleep', 'walkSpeed', 'dist', 'flights', 'exer', 'status', 'exertion'];
   const csv = [cols.join(','), ...rangeRows().map(r => cols.map(c => r[c] == null ? '' : typeof r[c] === 'number' ? round(r[c], 2) : r[c]).join(','))].join('\n');
   const btn = $('#copyCsv');
   try { await navigator.clipboard.writeText(csv); btn.textContent = 'Copied'; }
