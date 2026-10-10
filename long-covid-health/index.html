@@ -164,6 +164,19 @@ details[open] > summary { margin-bottom: 10px; }
     <div class="small muted" id="status" aria-live="polite"></div>
   </section>
 
+  <section class="panel" id="sendPanel">
+    <div class="panel-head">
+      <h2>Send to Claude</h2>
+      <p class="small muted">Saves your daily summary (one row per day, no raw readings) to this page so Claude can read it in your chat. Only you and editors of this page can see it.</p>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center">
+      <label class="ctl" for="pacingDate">Started HR pacing <input type="date" id="pacingDate"></label>
+      <label class="ctl" for="mestDate">Started Mestinon <input type="date" id="mestDate"></label>
+      <button class="btn primary" id="sendBtn" type="button">Send my data to Claude</button>
+      <span class="small muted" id="sendStatus" aria-live="polite"></span>
+    </div>
+  </section>
+
   <div class="controls" role="toolbar" aria-label="Filters">
     <div class="ctl"><span>Range</span>
       <div class="seg" id="range">
@@ -1474,6 +1487,25 @@ $('#exSleep').checked = state.excludeSleep;
 $('#exSleep').addEventListener('change', e => { state.excludeSleep = e.target.checked; store.set('lc_exsleep', e.target.checked ? '1' : '0'); if (state.raw) { state.days = derive(state.raw, state.meta); render(); } });
 $('#detailDay').addEventListener('change', renderDayDetail);
 $('#onset').addEventListener('change', e => { state.onset = e.target.value; store.set('lc_onset', state.onset); render(); });
+const CSV_COLS = ['date', 'steps', 'rhr', 'rhrBase', 'hrv', 'hrvBase', 'hrMin', 'hrAvg', 'hrMax', 'rhrApple', 'nightHR', 'walkHRCalc', 'walkMin', 'at', 'atMin', 'tachy100', 'tachy120', 'stillHigh', 'spikes', 'spikesStill', 'walkHR', 'hrr', 'spo2', 'resp', 'vo2', 'sleep', 'walkSpeed', 'dist', 'flights', 'exer', 'status', 'exertion'];
+const toCsv = rows => [CSV_COLS.join(','), ...rows.map(r => CSV_COLS.map(c => r[c] == null ? '' : typeof r[c] === 'number' ? round(r[c], 2) : r[c]).join(','))].join('\n');
+['pacingDate', 'mestDate'].forEach(id => { const el = $('#' + id); el.value = store.get('lc_' + id) || ''; el.addEventListener('change', () => store.set('lc_' + id, el.value)); });
+$('#sendBtn').addEventListener('click', async () => {
+  const out = $('#sendStatus'), btn = $('#sendBtn');
+  if (state.sample) { out.textContent = 'Load your Health export first. This is example data.'; return; }
+  btn.disabled = true; out.textContent = 'Sending…';
+  try {
+    const db = window.claude?.use ? await window.claude.use('db') : null;
+    if (!db) { out.textContent = 'Sending is not available in this view. Open the page on claude.ai while signed in.'; return; }
+    const csv = toCsv(state.days), CH = 180000, parts = [];
+    for (let i = 0; i < csv.length; i += CH) parts.push(csv.slice(i, i + CH));
+    for (let i = 0; i < parts.length; i++) await db.doc('uploads/csv_' + i).set({ i, text: parts[i] });
+    await db.doc('uploads/meta').set({ sentAt: new Date().toISOString(), days: state.days.length, first: state.days[0].date, last: state.days[state.days.length - 1].date, chunks: parts.length, onset: state.onset || null, pacingStart: $('#pacingDate').value || null, mestinonStart: $('#mestDate').value || null, excludeSleep: state.excludeSleep });
+    out.textContent = `Sent ${fmt(state.days.length)} days. Tell Claude in the chat that it's sent.`;
+  } catch (e) {
+    out.textContent = 'Could not send: ' + (e?.message || e?.code || e);
+  } finally { btn.disabled = false; }
+});
 $('#copyCsv').addEventListener('click', async () => {
   const cols = ['date', 'steps', 'rhr', 'rhrBase', 'hrv', 'hrvBase', 'hrMin', 'hrAvg', 'hrMax', 'rhrApple', 'nightHR', 'walkHRCalc', 'walkMin', 'at', 'atMin', 'tachy100', 'tachy120', 'stillHigh', 'spikes', 'spikesStill', 'walkHR', 'hrr', 'spo2', 'resp', 'vo2', 'sleep', 'walkSpeed', 'dist', 'flights', 'exer', 'status', 'exertion'];
   const csv = [cols.join(','), ...rangeRows().map(r => cols.map(c => r[c] == null ? '' : typeof r[c] === 'number' ? round(r[c], 2) : r[c]).join(','))].join('\n');
