@@ -1,0 +1,9 @@
+{
+  "example": true,
+  "onset": "2026-01-28",
+  "onsetLabel": "COVID + flu",
+  "pacingStart": "2026-05-28",
+  "mestinonStart": "2026-07-27",
+  "interventionCount": 40,
+  "interventions": []
+}

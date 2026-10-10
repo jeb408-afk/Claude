@@ -1,0 +1,350 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Recovery video graphics</title>
+<style>
+@font-face { font-family: Anton; src: url(anton.woff2) format("woff2"); }
+@font-face { font-family: Inter; src: url(inter.woff2) format("woff2"); font-weight: 100 900; }
+:root {
+  --bg: #0a0c0f; --bg-2: #1a1f26;
+  --ink: #f5f5f2; --muted: #8d959e; --grid: #222830;
+  --red: #ff3b47; --green: #39d98a; --amber: #ffc23d; --blue: #4ea1ff; --violet: #a58bff;
+  --display: Anton, Impact, sans-serif;
+  --body: Inter, "Liberation Sans", sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; }
+#stage { position: absolute; inset: 0; color: var(--ink); font-family: var(--body); }
+#stage.bg { background: radial-gradient(ellipse 90% 60% at 50% 38%, var(--bg-2), var(--bg) 72%); }
+.abs { position: absolute; }
+.center { left: 0; right: 0; text-align: center; }
+.disp { font-family: var(--display); line-height: .92; letter-spacing: .01em; }
+.label { font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.note { font-weight: 500; font-size: 30px; color: var(--muted); letter-spacing: .02em; }
+.chip { display: inline-block; padding: 18px 34px; border-radius: 999px; border: 3px solid #3a424c; font: 700 46px var(--body); color: var(--ink); background: #151a20; }
+.card { background: #141a21ee; border: 3px solid #2c343e; border-radius: 28px; padding: 30px 36px; }
+.wm { position: absolute; right: 40px; top: 40px; font: 800 26px var(--body); letter-spacing: .1em; color: var(--amber); border: 3px solid var(--amber); padding: 8px 16px; border-radius: 10px; }
+svg text { font-family: var(--body); }
+</style>
+<div id="stage"></div>
+<script>
+// Each scene is a pure function of t (seconds) returning HTML, so any frame renders deterministically.
+// Data comes from data/daily.csv (copied from the Long COVID Steps & HR page) and data/config.json,
+// injected by render.mjs as window.DATA = { csv, config }.
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, p) => a + (b - a) * p;
+const outCubic = p => 1 - Math.pow(1 - p, 3);
+const inOut = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const outBack = p => { const c = 1.9; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); };
+const fade = (t, a, d = .35) => outCubic(seg(t, a, a + d));
+const fadeOut = (t, a, d = .4) => 1 - seg(t, a, a + d);
+const rise = (t, a, d = .45, dy = 40) => { const p = fade(t, a, d); return `opacity:${p};transform:translateY(${(1 - p) * dy}px)`; };
+const fmtK = n => n >= 10000 ? fmt(n / 1000, 0) + 'k' : n >= 1000 ? fmt(n / 1000, 1) + 'k' : fmt(n);
+const fmt = (n, d = 0) => n == null || Number.isNaN(n) ? '–' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const sgn = (n, d = 0) => (n > 0 ? '+' : n < 0 ? '−' : '±') + fmt(Math.abs(n), d);
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const toMs = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10));
+const fmtDate = d => `${MONTHS[+d.slice(5, 7) - 1]} ${+d.slice(8, 10)}`;
+const mean = a => { a = a.filter(v => v != null && !Number.isNaN(v)); return a.length ? a.reduce((s, v) => s + v, 0) / a.length : null; };
+
+// ---------- data ----------
+let D = null;
+function loadData() {
+  const { csv, config } = window.DATA;
+  const [head, ...lines] = csv.trim().split(/\r?\n/);
+  const cols = head.split(',');
+  const rows = lines.map(l => { const v = l.split(','); const o = {}; cols.forEach((c, i) => { const x = v[i]; o[c] = x === '' || x == null ? null : c === 'date' || c === 'status' ? x : x === 'true' ? true : x === 'false' ? false : +x; }); return o; })
+    .filter(r => r.date).sort((a, b) => a.date < b.date ? -1 : 1);
+  const roll = (key, w = 7) => rows.map((_, i) => mean(rows.slice(Math.max(0, i - w + 1), i + 1).map(r => r[key])));
+  rows.forEach((r, i) => r.i = i);
+  const steps7 = roll('steps'), rhr7 = roll('rhr'), at7 = roll('atMin'), walk7 = roll('walkHRCalc', 14);
+  rows.forEach((r, i) => { r.steps7 = steps7[i]; r.rhr7 = rhr7[i]; r.at7 = at7[i]; r.walk7 = walk7[i]; });
+  const idxOf = d => { if (!d) return null; const i = rows.findIndex(r => r.date >= d); return i < 0 ? null : i; };
+  const cfg = config;
+  // highlights
+  let worst = null;
+  rows.forEach((r, i) => { if (i >= 14 && r.steps7 != null && (!worst || r.steps7 < worst.steps7)) worst = r; });
+  let pem = null;
+  rows.forEach((r, i) => {
+    if (!r.exertion || r.rhrBase == null) return;
+    const nx = rows.slice(i + 1, i + 4).filter(x => x.rhr != null);
+    if (!nx.length) return;
+    const top = nx.reduce((a, b) => (b.rhr > a.rhr ? b : a));
+    const rise = top.rhr - r.rhrBase;
+    if (!pem || rise > pem.rise) pem = { day: r, peak: top, rise, lag: top.i - r.i };
+  });
+  const first30 = rows.slice(0, 30), last30 = rows.slice(-30);
+  const onsetI = idxOf(cfg.onset);
+  const postStart = onsetI ?? 0;
+  // low point after onset: worst 30-day average of steps
+  let low = null;
+  for (let i = postStart; i + 30 <= rows.length; i += 3) { const a = mean(rows.slice(i, i + 30).map(r => r.steps)); if (low == null || a < low.steps) low = { i, steps: a, rhr: mean(rows.slice(i, i + 30).map(r => r.rhr)) }; }
+  const avg = (from, to, key) => mean(rows.slice(Math.max(0, from), Math.max(0, to)).map(r => r[key]));
+  const beforeAfter = (d) => {
+    const i = idxOf(d); if (i == null) return null;
+    const keys = ['steps', 'rhr', 'atMin', 'walkHRCalc', 'spikesStill'];
+    const b = {}, a = {}; for (const k of keys) { b[k] = avg(i - 30, i, k); a[k] = avg(i, i + 30, k); }
+    return { i, before: b, after: a };
+  };
+  // crash and climb numbers
+  const rollMinMax = (from, to, key, w, pick) => { let best = null; for (let i = Math.max(0, from); i + w <= Math.min(rows.length, to); i++) { const a = mean(rows.slice(i, i + w).map(r => r[key])); if (a == null) continue; if (best == null || (pick === 'min' ? a < best.v : a > best.v)) best = { i, v: a }; } return best; };
+  const hasPre = onsetI != null && rows.slice(Math.max(0, onsetI - 30), onsetI).filter(r => r.steps != null).length >= 10;
+  const preFrom = hasPre ? Math.max(0, onsetI - 30) : 0, preTo = hasPre ? onsetI : Math.min(30, rows.length);
+  const crashFrom = hasPre ? onsetI : 0;
+  const crash = {
+    hasPre, from: Math.max(0, (onsetI ?? 0) - 45), to: Math.min(rows.length, (onsetI ?? 0) + 100),
+    preSteps: avg(preFrom, preTo, 'steps'), preRHR: avg(preFrom, preTo, 'rhr'),
+    lowSteps: rollMinMax(crashFrom, crashFrom + 120, 'steps', 14, 'min'),
+    peakRHR: rollMinMax(crashFrom, crashFrom + 120, 'rhr', 14, 'max'),
+  };
+  const lowI = low ? low.i : 0;
+  const climb = {
+    from: lowI,
+    low: { steps: avg(lowI, lowI + 30, 'steps'), rhr: avg(lowI, lowI + 30, 'rhr'), walk: avg(lowI, lowI + 30, 'walkHRCalc') ?? avg(lowI, lowI + 30, 'walkHR') },
+    now: { steps: avg(rows.length - 30, rows.length, 'steps'), rhr: avg(rows.length - 30, rows.length, 'rhr'), walk: avg(rows.length - 30, rows.length, 'walkHRCalc') ?? avg(rows.length - 30, rows.length, 'walkHR') },
+  };
+  rows.forEach((r, i) => { r.walkAny7 = walk7[i] ?? null; });
+  if (!rows.some(r => r.walkAny7 != null)) { const w2 = roll('walkHR', 14); rows.forEach((r, i) => r.walkAny7 = w2[i]); }
+  // weekly points after onset for the scatter
+  const weeks = [];
+  for (let i = onsetI ?? 0; i + 7 <= rows.length; i += 7) { const st = avg(i, i + 7, 'steps'), hr = avg(i, i + 7, 'rhr'); if (st != null && hr != null) weeks.push({ i, date: rows[i].date, steps: st, rhr: hr }); }
+  const pearson = (a, b) => { const n = a.length; if (n < 4) return null; const ma = mean(a), mb = mean(b); let sab = 0, saa = 0, sbb = 0; for (let k = 0; k < n; k++) { sab += (a[k] - ma) * (b[k] - mb); saa += (a[k] - ma) ** 2; sbb += (b[k] - mb) ** 2; } return sab / Math.sqrt(saa * sbb); };
+  const r = pearson(weeks.map(w => w.steps), weeks.map(w => w.rhr));
+  D = {
+    crash, climb, weeks, r,
+    rows, cfg, onsetI, worst, pem, low,
+    first: { steps: mean(first30.map(r => r.steps)), rhr: mean(first30.map(r => r.rhr)) },
+    last: { steps: mean(last30.map(r => r.steps)), rhr: mean(last30.map(r => r.rhr)) },
+    pacingI: idxOf(cfg.pacingStart), mestI: idxOf(cfg.mestinonStart),
+    pacing: beforeAfter(cfg.pacingStart), mest: beforeAfter(cfg.mestinonStart),
+    days: rows.length,
+  };
+}
+
+// ---------- chart ----------
+// A time chart for one measure. reveal 0..1 draws left to right. marks = [{i, label, color}], hl = [{i, color}]
+function timeChart({ x = 150, y, w = 840, h, cap, key, bars, color, label, unit, reveal = 1, marks = [], hl = [], dim = 1, zero = false, labelOpacity = 1, xLabels = true, from = 0, to = null, extra = [] }) {
+  const rows = D.rows.slice(from, to ?? D.days), n = rows.length;
+  marks = marks.map(m => ({ ...m, i: m.i == null ? null : m.i - from })).filter(m => m.i == null || (m.i >= 0 && m.i < n));
+  hl = hl.map(p => ({ ...p, i: p.i == null ? null : p.i - from })).filter(p => p.i == null || (p.i >= 0 && p.i < n));
+  const vals = rows.flatMap(r => [r[key], ...extra.map(e => r[e.key])]).filter(v => v != null);
+  const barVals = bars ? rows.map(r => r[bars]).filter(v => v != null) : [];
+  const q = (a, f) => { a = [...a].sort((m, n) => m - n); return a[Math.floor((a.length - 1) * f)]; };
+  let lo = zero ? 0 : Math.min(...vals), hi = Math.max(...vals, ...(barVals.length ? [Math.max(...barVals) * .85] : []));
+  if (cap) hi = Math.min(hi, Math.max(q(vals, .95), 1) * 1.4);
+  if (!zero) { const pad = (hi - lo) * .15 || 2; lo -= pad; hi += pad; }
+  const X = i => x + (i + .5) / n * w, Y = v => y + h - (v - lo) / (hi - lo || 1) * h;
+  const cut = Math.floor(reveal * n);
+  let s = `<svg class="abs" style="left:0;top:0;opacity:${dim}" width="1080" height="1920">`;
+  // gridlines (3)
+  for (let k = 0; k <= 2; k++) { const v = lo + (hi - lo) * k / 2, yy = Y(v); s += `<line x1="${x}" x2="${x + w}" y1="${yy}" y2="${yy}" stroke="#222830" stroke-width="2"/><text x="${x - 16}" y="${yy + 9}" fill="#5d6670" font-size="26" text-anchor="end">${fmtK(v)}</text>`; }
+  if (bars) {
+    const bw = Math.max(1.5, w / n - 1);
+    for (let i = 0; i < cut; i++) { const v = rows[i][bars]; if (v == null) continue; const top = Y(Math.min(v, hi)); s += `<rect x="${X(i) - bw / 2}" y="${top}" width="${bw}" height="${Y(Math.max(lo, 0)) - top}" fill="${color}" opacity=".28"/>`; }
+  }
+  let d = '', pen = false;
+  for (let i = 0; i < cut; i++) { const v = rows[i][key]; if (v == null) { pen = false; continue; } d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(Math.min(v, hi)).toFixed(1); pen = true; }
+  s += `<path d="${d}" fill="none" stroke="${color}" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>`;
+  for (const e of extra) {
+    let d2 = '', pen2 = false;
+    for (let i = 0; i < cut; i++) { const v = rows[i][e.key]; if (v == null) { pen2 = false; continue; } d2 += (pen2 ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(Math.min(v, hi)).toFixed(1); pen2 = true; }
+    s += `<path d="${d2}" fill="none" stroke="${e.color}" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
+  const lastI = (() => { for (let i = cut - 1; i >= 0; i--) if (rows[i][key] != null) return i; return -1; })();
+  if (lastI >= 0 && reveal < 1) s += `<circle cx="${X(lastI)}" cy="${Y(Math.min(rows[lastI][key], hi))}" r="12" fill="${color}" stroke="#0a0c0f" stroke-width="5"/>`;
+  for (const m of marks) {
+    if (m.i == null || m.i > cut) continue;
+    s += `<line x1="${X(m.i)}" x2="${X(m.i)}" y1="${y - 10}" y2="${y + h}" stroke="${m.color || '#fff'}" stroke-width="3" stroke-dasharray="10 8" opacity="${m.opacity ?? 1}"/>`;
+  }
+  for (const p of hl) { if (p.i == null || rows[p.i][key] == null) continue; s += `<circle cx="${X(p.i)}" cy="${Y(rows[p.i][key])}" r="${p.r || 18}" fill="none" stroke="${p.color}" stroke-width="6"/>`; }
+  if (xLabels) {
+    let lastMo = '';
+    rows.forEach((r, i) => { const mo = r.date.slice(0, 7); if (mo !== lastMo && r.date.slice(8) <= '07') { lastMo = mo; if (+mo.slice(5) % 2 === 1 || n < 200) s += `<text x="${X(i)}" y="${y + h + 44}" fill="#6b747e" font-size="26" text-anchor="middle">${MONTHS[+mo.slice(5) - 1]}</text>`; } });
+  }
+  s += `</svg>`;
+  s += `<div class="abs label" style="left:${x}px;top:${y - 66}px;font-size:32px;color:${color};opacity:${labelOpacity}">${label}<span style="color:var(--muted);font-weight:600;text-transform:none;letter-spacing:0"> ${unit || ''}</span></div>`;
+  return { html: s, X, Y };
+}
+const markLabel = (X, i, top, text, color, op) => i == null ? '' : `<div class="abs label" style="left:${Math.min(800, Math.max(40, X(i) - 120))}px;top:${top}px;width:240px;text-align:center;font-size:26px;color:${color};opacity:${op}">${text}</div>`;
+const exampleMark = () => D.cfg.example ? `<div class="wm">EXAMPLE DATA</div>` : '';
+
+const S = {
+  // 0:00–0:10 Opening hook
+  s01_hook: { dur: 10, bg: false, render(t) {
+    const out = fadeOut(t, 9.2, .7);
+    return `<div class="abs center disp" style="top:700px;font-size:190px;${rise(t, 1.0, .8, 30)};opacity:${fade(t, 1.0, .8) * out}">LONG COVID.</div>
+      <div class="abs center" style="top:960px;font:600 64px/1.3 var(--body);padding:0 110px;color:#d9dcdf;opacity:${fade(t, 3.4, .9) * out};transform:translateY(${(1 - fade(t, 3.4, .9)) * 24}px)">One year of trying to get my life back.</div>`;
+  }},
+
+  // 0:10–0:28 Timeline builds: steps and resting HR on a shared time axis
+  s02_timeline: { dur: 18, render(t) {
+    const p = inOut(seg(t, 1.2, 12));
+    const marks = [{ i: D.onsetI, color: '#ff3b47' }];
+    const a = timeChart({ y: 560, h: 420, key: 'steps7', bars: 'steps', color: '#4ea1ff', label: 'Steps per day', unit: '(7-day avg)', reveal: p, marks, zero: true, labelOpacity: fade(t, .4) });
+    const b = timeChart({ y: 1180, h: 380, key: 'rhr7', color: '#ff3b47', label: 'Resting heart rate', unit: 'bpm', reveal: p, marks });
+    const onsetOp = D.onsetI != null && p * D.days > D.onsetI ? fade(t, 1.2 + (D.onsetI / D.days) * 10.8, .4) : 0;
+    return `<div class="abs center label" style="top:250px;font-size:40px;color:var(--muted);${rise(t, 0)}">${fmtDate(D.rows[0].date)} ${D.rows[0].date.slice(0, 4)} to ${fmtDate(D.rows[D.days - 1].date)} ${D.rows[D.days - 1].date.slice(0, 4)}</div>
+      <div class="abs center disp" style="top:320px;font-size:110px;${rise(t, .15)}">MY STEPS AND HEART</div>
+      ${a.html}${b.html}
+      ${markLabel(a.X, D.onsetI, 1040, D.cfg.onsetLabel || 'COVID', '#ff3b47', onsetOp)}
+      ${exampleMark()}`;
+  }},
+
+  // 0:28–0:43 The data: highlight a setback, a delayed crash, and the change since the start
+  s03_data: { dur: 15, render(t) {
+    const hl = [];
+    const c1 = fade(t, 1.0) * fadeOut(t, 5.2), c2 = fade(t, 5.6) * fadeOut(t, 9.8), c3 = fade(t, 10.2);
+    if (D.worst && c1 > 0) hl.push({ i: D.worst.i, color: '#ffc23d' });
+    if (D.pem && c2 > 0) hl.push({ i: D.pem.day.i, color: '#ffc23d', r: 14 });
+    const a = timeChart({ y: 560, h: 420, key: 'steps7', bars: 'steps', color: '#4ea1ff', label: 'Steps per day', unit: '(7-day avg)', marks: [{ i: D.onsetI, color: '#ff3b47', opacity: .5 }], zero: true, hl });
+    const hl2 = D.pem && c2 > 0 ? [{ i: D.pem.peak.i, color: '#ffc23d', r: 14 }] : [];
+    const b = timeChart({ y: 1180, h: 380, key: 'rhr', color: '#ff3b47', label: 'Resting heart rate', unit: 'bpm (daily)', marks: [{ i: D.onsetI, color: '#ff3b47', opacity: .5 }], hl: hl2 });
+    const card = (op, html) => op > 0 ? `<div class="abs card" style="left:90px;right:90px;top:1690px;opacity:${op};transform:translateY(${(1 - op) * 30}px)">${html}</div>` : '';
+    const stepPct = D.low && D.last.steps ? (D.last.steps / D.low.steps - 1) * 100 : null;
+    return `<div class="abs center disp" style="top:300px;font-size:110px;${rise(t, 0)}">PROGRESS <span style="color:var(--muted)">&amp;</span> SETBACKS</div>
+      ${a.html}${b.html}
+      ${D.worst ? card(c1, `<div class="label" style="font-size:30px;color:var(--amber)">Setback · week of ${fmtDate(D.worst.date)}</div><div style="font:700 46px var(--body);margin-top:8px">${fmt(D.worst.steps7)} steps a day</div>`) : ''}
+      ${D.pem ? card(c2, `<div class="label" style="font-size:30px;color:var(--amber)">Crash after a big day · ${fmtDate(D.pem.day.date)}</div><div style="font:700 46px var(--body);margin-top:8px">${fmt(D.pem.day.steps)} steps → resting HR ${sgn(D.pem.rise)} ${D.pem.lag} day${D.pem.lag === 1 ? '' : 's'} later</div>`) : ''}
+      ${card(c3, `<div class="label" style="font-size:30px;color:var(--green)">Last 30 days vs. worst month</div><div style="font:700 46px var(--body);margin-top:8px">Steps ${stepPct == null ? '–' : sgn(stepPct) + '%'} · Resting HR ${D.low ? sgn(D.last.rhr - D.low.rhr) : '–'} bpm</div>`)}
+      ${exampleMark()}`;
+  }},
+
+  // 0:43–0:59 40+ interventions
+  s04_interventions: { dur: 16, render(t) {
+    const N = D.cfg.interventionCount || 40, list = D.cfg.interventions || [];
+    const count = Math.round(N * outCubic(seg(t, .6, 3.2)));
+    const rowsN = 14, scroll = t * 70;
+    let log = '';
+    for (let k = 0; k < rowsN + 2; k++) {
+      const idx = Math.floor(scroll / 96) + k, y = 1080 + k * 96 - (scroll % 96);
+      if (y < 1000 || y > 1880) continue;
+      const it = list.length ? list[idx % list.length] : null;
+      const op = clamp((y - 1000) / 120) * clamp((1880 - y) / 160) * fade(t, 3.4, .6);
+      const tag = it?.result || '';
+      const tagColor = /help/i.test(tag) ? 'var(--green)' : /no|none/i.test(tag) ? '#6b747e' : 'var(--amber)';
+      log += it
+        ? `<div class="abs" style="left:110px;right:110px;top:${y}px;height:74px;border-bottom:2px solid #222830;display:flex;justify-content:space-between;align-items:center;opacity:${op}"><span style="font:600 40px var(--body)">${it.name}</span><span class="label" style="font-size:26px;color:${tagColor}">${tag}</span></div>`
+        : `<div class="abs" style="left:110px;top:${y + 20}px;width:${320 + ((idx * 137) % 380)}px;height:30px;border-radius:15px;background:#1d242c;opacity:${op}"></div><div class="abs" style="right:110px;top:${y + 20}px;width:150px;height:30px;border-radius:15px;background:#1a2027;opacity:${op}"></div>`;
+    }
+    return `<div class="abs center disp" style="top:330px;font-size:420px;color:var(--ink);opacity:${fade(t, .3)}">${count}${count >= N ? '+' : ''}</div>
+      <div class="abs center label" style="top:780px;font-size:64px;color:var(--amber);${rise(t, 1.2)}">interventions tried</div>
+      <div class="abs center note" style="top:880px;font-size:36px;${rise(t, 2.2)}">Medications · supplements · pacing · rest</div>
+      ${log}`;
+  }},
+
+  // 0:59–1:15 Heart-rate pacing and Mestinon: what the data shows around each start date
+  s05_pacing: { dur: 16, render(t) {
+    const marks = [{ i: D.pacingI, color: '#39d98a' }, { i: D.mestI, color: '#a58bff' }];
+    const a = timeChart({ y: 520, h: 320, key: 'at7', bars: 'atMin', color: '#ff3b47', label: 'Minutes above HR threshold', unit: 'per day', reveal: inOut(seg(t, .3, 4)), marks, zero: true, cap: true });
+    const b = timeChart({ y: 1010, h: 250, key: 'steps7', color: '#4ea1ff', label: 'Steps per day', unit: '(7-day avg)', reveal: inOut(seg(t, .3, 4)), marks, zero: true });
+    const p1 = fade(t, 4.6), p2 = fade(t, 9.4);
+    const ba = (x, color, title, data, op) => {
+      if (op <= 0) return '';
+      const body = data
+        ? `<div style="display:grid;grid-template-columns:1fr auto auto;gap:10px 18px;font:600 32px var(--body);margin-top:16px;align-items:baseline">
+            <span style="color:var(--muted)"></span><span class="label" style="font-size:22px;color:var(--muted)">Before</span><span class="label" style="font-size:22px;color:var(--muted)">After</span>
+            <span>Over limit</span><span>${fmt(data.before.atMin)}m</span><span>${fmt(data.after.atMin)}m</span>
+            <span>Resting</span><span>${fmt(data.before.rhr)}</span><span>${fmt(data.after.rhr)}</span>
+            <span>Steps</span><span>${fmt(data.before.steps / 1000, 1)}k</span><span>${fmt(data.after.steps / 1000, 1)}k</span></div>`
+        : `<div class="note" style="margin-top:12px">Add the start date in data/config.json</div>`;
+      return `<div class="abs card" style="left:${x}px;width:440px;top:1420px;border-color:${color};opacity:${op};transform:translateY(${(1 - op) * 30}px)"><div class="disp" style="font-size:60px;color:${color}">${title}</div>${body}</div>`;
+    };
+    return `<div class="abs center disp" style="top:300px;font-size:110px;${rise(t, 0)}">WHAT CHANGED?</div>
+      ${a.html}${b.html}
+      ${markLabel(a.X, D.pacingI, 1338, 'Pacing', '#39d98a', p1)}
+      ${markLabel(a.X, D.mestI, 1338, 'Mestinon', '#a58bff', p2)}
+      ${ba(70, '#39d98a', 'HR PACING', D.pacing, p1)}
+      ${ba(570, '#a58bff', 'MESTINON', D.mest, p2)}
+      <div class="abs center note" style="top:1800px;font-size:28px;opacity:${fade(t, 11)}">30 days before vs. 30 days after each start.<br>Shows change, not cause.</div>
+      ${exampleMark()}`;
+  }},
+
+  // 1:15–1:25 Timeline returns, then the title card
+  s06_title: { dur: 10, render(t) {
+    const chartOp = fadeOut(t, 4.6, .6);
+    const marks = [{ i: D.onsetI, color: '#ff3b47' }, { i: D.pacingI, color: '#39d98a' }, { i: D.mestI, color: '#a58bff' }];
+    const a = timeChart({ y: 760, h: 460, key: 'steps7', bars: 'steps', color: '#4ea1ff', label: 'One year of steps', unit: '', marks, zero: true, dim: chartOp, labelOpacity: chartOp });
+    const tp = outBack(seg(t, 5.2, 5.9));
+    return `${a.html}
+      <div class="abs center disp" style="top:700px;font-size:170px;line-height:1;padding:0 80px;opacity:${clamp(tp * 2)};transform:scale(${lerp(.85, 1, tp)})">WHAT HAS<br><span style="color:var(--green)">ACTUALLY</span><br>HELPED?</div>
+      ${chartOp > 0 ? exampleMark() : ''}`;
+  }},
+};
+
+// ---------- still images ----------
+const bigStat = (label, from, to, delta, color) => `<div class="card" style="flex:1"><div class="label" style="font-size:26px;color:var(--muted)">${label}</div>
+  <div style="font:700 44px var(--body);margin-top:10px;white-space:nowrap">${from} <span style="color:var(--muted)">→</span> ${to}</div>
+  <div class="disp" style="font-size:96px;color:${color};margin-top:8px">${delta}</div></div>`;
+S.img_crash = { dur: 1, image: true, render() {
+  const c = D.crash, marks = [{ i: D.onsetI, color: '#ff3b47' }];
+  const a = timeChart({ y: 560, h: 380, key: 'steps7', bars: 'steps', color: '#4ea1ff', label: 'Steps per day', unit: '', marks, zero: true, from: c.from, to: c.to });
+  const b = timeChart({ y: 1120, h: 330, key: 'rhr', color: '#ff3b47', label: 'Resting heart rate', unit: 'bpm', marks, from: c.from, to: c.to });
+  const stPct = c.preSteps && c.lowSteps ? (c.lowSteps.v / c.preSteps - 1) * 100 : null;
+  const hrUp = c.preRHR != null && c.peakRHR ? c.peakRHR.v - c.preRHR : null;
+  const fromLab = c.hasPre ? 'Before' : 'First month';
+  return `<div class="abs center label" style="top:230px;font-size:38px;color:var(--muted)">${D.cfg.onsetLabel || 'COVID'}${D.onsetI != null ? ' · ' + fmtDate(D.rows[D.onsetI].date) + ' ' + D.rows[D.onsetI].date.slice(0, 4) : ''}</div>
+    <div class="abs center disp" style="top:300px;font-size:150px">THE CRASH</div>
+    ${a.html}${b.html}
+    <div class="abs" style="left:70px;right:70px;top:1560px;display:flex;gap:28px">
+      ${bigStat(`Steps/day · ${fromLab.toLowerCase()} → worst 2 wks`, fmtK(c.preSteps), fmtK(c.lowSteps?.v), stPct == null ? '–' : sgn(stPct) + '%', 'var(--blue)')}
+      ${bigStat(`Resting HR · ${fromLab.toLowerCase()} → peak 2 wks`, fmt(c.preRHR), fmt(c.peakRHR?.v), hrUp == null ? '–' : sgn(hrUp) + ' bpm', 'var(--red)')}
+    </div>${exampleMark()}`;
+}};
+S.img_climb = { dur: 1, image: true, render() {
+  const c = D.climb, from = c.from;
+  const a = timeChart({ y: 560, h: 380, key: 'steps7', bars: 'steps', color: '#4ea1ff', label: 'Steps per day', unit: '(7-day avg)', zero: true, from });
+  const hasWalk = D.rows.slice(from).some(r => r.walkAny7 != null);
+  const b = timeChart({ y: 1120, h: 330, key: 'rhr7', color: '#ff3b47', label: 'Heart rate', unit: 'bpm', from, extra: hasWalk ? [{ key: 'walkAny7', color: '#ffc23d' }] : [] });
+  const ratio = c.low.steps ? c.now.steps / c.low.steps : null;
+  const dW = c.low.walk != null && c.now.walk != null ? c.now.walk - c.low.walk : null;
+  const dR = c.low.rhr != null && c.now.rhr != null ? c.now.rhr - c.low.rhr : null;
+  const hrWord = d => d == null ? '' : Math.abs(d) <= 3 ? 'about the same heart rate' : d < 0 ? 'a lower heart rate' : 'a higher heart rate';
+  return `<div class="abs center label" style="top:230px;font-size:38px;color:var(--muted)">Worst month → last 30 days</div>
+    <div class="abs center disp" style="top:300px;font-size:150px">THE CLIMB</div>
+    ${a.html}${b.html}
+    <div class="abs legend label" style="right:90px;top:1058px;font-size:26px;display:flex;gap:30px"><span style="color:#ff3b47">— Resting</span>${hasWalk ? '<span style="color:#ffc23d">— While walking</span>' : ''}</div>
+    <div class="abs" style="left:70px;right:70px;top:1560px;display:flex;gap:20px">
+      ${bigStat('Steps/day', fmtK(c.low.steps), fmtK(c.now.steps), ratio == null ? '–' : fmt(ratio, 1) + '×', 'var(--blue)')}
+      ${bigStat('Resting HR', fmt(c.low.rhr), fmt(c.now.rhr), dR == null ? '–' : sgn(dR), 'var(--red)')}
+      ${hasWalk ? bigStat('Walking HR', fmt(c.low.walk), fmt(c.now.walk), dW == null ? '–' : sgn(dW), 'var(--amber)') : ''}
+    </div>
+    <div class="abs center" style="top:1830px;font:600 40px var(--body)">${ratio == null ? '' : `${fmt(ratio, 1)}× the steps, ${hrWord(hasWalk ? dW : dR)}`}</div>${exampleMark()}`;
+}};
+S.img_scatter = { dur: 1, image: true, render() {
+  const W = D.weeks; if (!W.length) return '<div class="abs center disp" style="top:800px;font-size:80px">Not enough weeks</div>';
+  const x0 = 170, x1 = 990, y0 = 560, y1 = 1440;
+  const sx = W.map(w => w.steps), sy = W.map(w => w.rhr);
+  const lx = 0, hx = Math.max(...sx) * 1.08, ly = Math.min(...sy) - 2, hy = Math.max(...sy) + 2;
+  const X = v => x0 + (v - lx) / (hx - lx) * (x1 - x0), Y = v => y1 - (v - ly) / (hy - ly) * (y1 - y0);
+  const col = k => { const p = k / Math.max(1, W.length - 1); const a = [255, 59, 71], b = [57, 217, 138]; return `rgb(${a.map((v, j) => Math.round(v + (b[j] - v) * p)).join(',')})`; };
+  let svg = `<svg class="abs" style="left:0;top:0" width="1080" height="1920">`;
+  for (let k = 0; k <= 3; k++) { const v = lx + (hx - lx) * k / 3; svg += `<line x1="${X(v)}" x2="${X(v)}" y1="${y0}" y2="${y1}" stroke="#222830" stroke-width="2"/><text x="${X(v)}" y="${y1 + 44}" fill="#6b747e" font-size="28" text-anchor="middle">${fmtK(v)}</text>`; }
+  for (let k = 0; k <= 3; k++) { const v = ly + (hy - ly) * k / 3; svg += `<line x1="${x0}" x2="${x1}" y1="${Y(v)}" y2="${Y(v)}" stroke="#222830" stroke-width="2"/><text x="${x0 - 16}" y="${Y(v) + 9}" fill="#6b747e" font-size="28" text-anchor="end">${fmt(v)}</text>`; }
+  svg += `<path d="${W.map((w, k) => (k ? 'L' : 'M') + X(w.steps) + ',' + Y(w.rhr)).join('')}" fill="none" stroke="#3a424c" stroke-width="3"/>`;
+  W.forEach((w, k) => { svg += `<circle cx="${X(w.steps)}" cy="${Y(w.rhr)}" r="15" fill="${col(k)}" stroke="#0a0c0f" stroke-width="4"/>`; });
+  svg += `</svg>`;
+  const f = W[0], l = W[W.length - 1];
+  const tag = (w, text, color, dy) => `<div class="abs label" style="left:${Math.min(820, X(w.steps) + 24)}px;top:${Y(w.rhr) + dy}px;font-size:30px;color:${color}">${text}<br><span style="font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)">${fmtDate(w.date)}</span></div>`;
+  const r = D.r;
+  const words = r == null ? '' : r <= -0.5 ? 'As my steps went up, my resting heart rate went down.' : r < -0.2 ? 'More steps tended to come with a lower resting heart rate.' : r < 0.2 ? 'My resting heart rate held steady as steps changed.' : 'Weeks with more steps had a higher resting heart rate.';
+  return `<div class="abs center label" style="top:230px;font-size:38px;color:var(--muted)">Each dot is one week since COVID</div>
+    <div class="abs center disp" style="top:310px;font-size:100px">MORE STEPS, CALMER HEART</div>
+    <div class="abs label" style="left:${x0}px;top:${y0 - 60}px;font-size:30px;color:#ff3b47">Resting heart rate <span style="color:var(--muted);text-transform:none;letter-spacing:0;font-weight:600">bpm</span></div>
+    ${svg}
+    <div class="abs label" style="left:0;right:90px;text-align:right;top:${y1 + 70}px;font-size:30px;color:#4ea1ff">Average steps per day →</div>
+    ${tag(f, 'First weeks', '#ff3b47', -60)}${tag(l, 'Now', '#39d98a', -20)}
+    <div class="abs card" style="left:70px;right:70px;top:1620px;display:flex;gap:30px;align-items:center">
+      <div class="disp" style="font-size:110px;color:var(--green);white-space:nowrap">r = ${r == null ? '–' : (r < 0 ? '−' : '') + fmt(Math.abs(r), 2)}</div>
+      <div style="font:600 36px/1.3 var(--body)">${words}<div class="note" style="font-size:26px;margin-top:8px">Correlation of weekly steps and resting HR, ${W.length} weeks</div></div>
+    </div>${exampleMark()}`;
+}};
+
+window.SCENES = Object.fromEntries(Object.entries(S).map(([k, v]) => [k, { dur: v.dur, alpha: false, image: !!v.image }]));
+window.renderFrame = (id, t) => {
+  if (!D) loadData();
+  const st = document.getElementById('stage');
+  st.className = S[id].bg === false ? '' : 'bg';
+  st.style.background = S[id].bg === false ? '#000' : '';
+  st.innerHTML = S[id].render(t);
+};
+</script>
